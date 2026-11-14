@@ -409,7 +409,7 @@ def discs():
 
 
 def rescued_bytes(mapfile, total):
-    """Accept only a complete, contiguous ddrescue map snapshot."""
+    """Count the bounded read domain; raw devices may have an open-ended tail."""
     try:
         rows = []
         for line in Path(mapfile).read_text().splitlines():
@@ -423,9 +423,14 @@ def rescued_bytes(mapfile, total):
             rows.append((position,size,fields[2]))
         cursor = rescued = 0
         for position,size,status in rows:
-            if position != cursor or position+size > total: return None
-            cursor += size
-            if status == "+": rescued += size
+            # A raw device has no regular-file length. ddrescue therefore keeps
+            # an untried tail up to LLONG_MAX even when --size bounds this read.
+            # Only intervals intersecting the actual read domain contribute.
+            if position >= total: continue
+            end = min(position+size,total)
+            if position != cursor: return None
+            if status == "+": rescued += end-position
+            cursor = end
         return rescued if cursor == total else None
     except (OSError,UnicodeError):
         return None

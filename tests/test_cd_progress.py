@@ -15,10 +15,21 @@ class CDProgressTests(unittest.TestCase):
     def test_partial_or_overlapping_map_is_ignored(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/'disc.map'
-            for data in ['0 20 +\n','0 60 +\n50 50 ?\n','0 20 +\n20 90 ?\n']:
+            for data in ['0 20 +\n','0 60 +\n50 50 ?\n','0 20 +\n40 60 ?\n']:
                 p.write_text(data)
                 self.assertIsNone(r.rescued_bytes(p,100))
             p.write_text('# current_pos current_status current_pass\n0x20 ? 1\n0x00 0x14 +\n0x14 0x14 *\n0x28 0x3c ?\n')
+            self.assertEqual(r.rescued_bytes(p,100),20)
+
+    def test_raw_device_map_with_unbounded_tail(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/'disc.map'
+            p.write_text('# current_pos current_status current_pass\n0x00107910 ? 1\n'
+                         '0x00000000 0x00117120 +\n0x00117120 0x022CC6E0 ?\n'
+                         '0x023E3800 0x7FFFFFFFFDC1C7FF ?\n')
+            self.assertEqual(r.rescued_bytes(p,37632000),0x00117120)
+            # One map interval can cross the domain boundary as well.
+            p.write_text('0 20 +\n20 0x7FFFFFFFFFFFFFEB ?\n')
             self.assertEqual(r.rescued_bytes(p,100),20)
 
     def test_eta_tracks_progress_and_disappears_when_stalled(self):
@@ -44,11 +55,11 @@ class CDProgressTests(unittest.TestCase):
     @unittest.skipUnless(r.tool('ddrescue',False),'ddrescue required')
     def test_actual_ddrescue_emits_progress_during_a_throttled_read(self):
         with tempfile.TemporaryDirectory() as d:
-            p=Path(d);source=p/'source.bin';source.write_bytes(b'A'*(2352*400))
+            p=Path(d);source=p/'source.bin';source.write_bytes(b'A'*(2352*500));size=2352*400
             original=r.sha(source)
-            tracker=r.CDReadProgress(p/'disc.map',source.stat().st_size)
+            tracker=r.CDReadProgress(p/'disc.map',size)
             command=[r.tool('ddrescue'),'-q','-n','--mapfile-interval=1,5','--max-read-rate=235200',
-                     '-b','2352',str(source),str(p/'copy.bin'),str(p/'disc.map')]
+                     '-b','2352','-s',str(size),str(source),str(p/'copy.bin'),str(p/'disc.map')]
             with contextlib.redirect_stdout(io.StringIO()) as out:
                 r.run(command,p/'capture.log','Reading the CD',read_progress=tracker)
             events=[json.loads(line) for line in out.getvalue().splitlines()]
@@ -56,7 +67,7 @@ class CDProgressTests(unittest.TestCase):
             self.assertTrue(any(e.get('eta_seconds') is not None for e in events),events)
             self.assertEqual(events[-1]['fraction'],1)
             self.assertEqual(r.sha(source),original)
-            self.assertEqual((p/'copy.bin').read_bytes(),source.read_bytes())
+            self.assertEqual((p/'copy.bin').read_bytes(),source.read_bytes()[:size])
 
 
 if __name__=='__main__':unittest.main()

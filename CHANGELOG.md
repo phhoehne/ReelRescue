@@ -2,6 +2,8 @@
 
 ## 1.1.0 — Unreleased
 
+- Fix CD progress parsing when ddrescue includes an open-ended raw-device map tail.
+
 - Show a live CD-reading progress bar, percentage, bytes read and adaptive ETA.
 
 - Recover original MPEG tracks as the only extraction result, preserving MPEG-2 on SVCDs and MPEG-1 on VCDs.
