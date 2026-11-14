@@ -77,8 +77,10 @@ Stop terminates processing and keeps partial work plus recovery maps.
 Completed video files are published only after decoding and basic timing,
 dimension, frame-count and audio checks. Passing these checks means the file
 is playable; it does not mean all visible or audible source defects are gone.
-Outputs contain report.json, settings.json, exact encoder commands, logs,
-validation records and SHA256 checksums. Partial files are clearly named.
+Playable MP4 files and Results.txt are at the top level. Recovery data contains
+raw reads, recovered images and Original video MPEGs. Diagnostics contains
+report.json, settings.json, exact commands, logs, validation records and SHA256
+checksums. Partial work remains in these folders after failure or cancellation.
 Keep originals and raw recoveries even after producing a good viewing copy.
 
 REQUIREMENTS

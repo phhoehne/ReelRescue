@@ -187,7 +187,7 @@ def raw_image(path):
         raise RescueError(f"{path.name} is not a 2,352-byte raw CD image. This recovery mode supports raw VCD/SVCD images, not ordinary DVD or 2,048-byte ISO images. Use Improve a video for an extracted MPEG file.")
 
 
-def merge_images(paths, output, expected_sectors=None):
+def merge_images(paths, output, expected_sectors=None, report_path=None):
     """Index by recorded LBA, including disordered inputs; flag valid conflicts."""
     paths = [Path(p).resolve() for p in paths]
     if not paths or len(paths) > 16:
@@ -249,7 +249,7 @@ def merge_images(paths, output, expected_sectors=None):
                       missing_lbas=missing,unverified_lbas=invalid,conflicting_lbas=sorted(conflicts),
                       unresolved_lbas=sorted(set(missing) | set(invalid) | conflicts),inputs=summaries,
                       note="EDC does not protect Mode 2 address bytes. Verification is sector-level evidence, not proof of perfect footage. Conflicting valid reads are retained but never counted as verified.")
-        dump(Path(output).with_suffix(".json"), report)
+        dump(report_path or Path(output).with_suffix(".json"), report)
         return report
     finally:
         for m in maps: m.close()
@@ -398,7 +398,7 @@ def discs():
     return disc_inventory()["discs"]
 
 
-def capture(device, folder, expected=None):
+def capture(device, folder, expected=None, diagnostics=None):
     info = disk_info(device)
     if expected and info["identity"] != expected:
         raise RescueError("The selected drive or disc changed. Refresh the list and select it again.")
@@ -406,12 +406,12 @@ def capture(device, folder, expected=None):
     # No force, output overwrite, device writes, unmounts or sudo commands.
     cmd = [tool("ddrescue"),"-q","-n","-b",str(RAW),"-s",str(info["size"]),
            info["raw_device"],str(image),str(mapfile)]
-    progress("Reading the CD", None, "The original disc is read-only. The recovery map is saved with this project.")
-    run(cmd, folder / "capture.log", "Reading the CD")
+    progress("Reading the CD")
+    run(cmd, (diagnostics or folder) / "capture.log", "Reading the CD")
     return image, info
 
 
-def retry(device, report, folder, expected=None):
+def retry(device, report, folder, expected=None, diagnostics=None):
     info = disk_info(device)
     if expected and info["identity"] != expected: raise RescueError("The disc changed before the retry pass.")
     targets = report["unresolved_lbas"]
@@ -435,7 +435,7 @@ def retry(device, report, folder, expected=None):
                         records.append(dict(lba=a,attempt=attempt+1,valid=good))
                     except OSError as e:
                         records.append(dict(lba=a,attempt=attempt+1,error=str(e)))
-                    dump(folder / "retry_report.json",dict(attempts=records,remaining=sorted(remaining)))
+                    dump((diagnostics or folder) / "retry_report.json",dict(attempts=records,remaining=sorted(remaining)))
                     progress("Retrying uncertain sectors", (attempt + (n+1)/len(pending))/2,
                              f"{len(targets)-len(remaining)} of {len(targets)} recovered")
                 if not remaining: break
@@ -492,6 +492,8 @@ def decoded_frames(path):
 
 
 def export_video(source, folder, options, prefix="Film", recovering=False, preview=False):
+    diagnostics = Path(folder) / "Diagnostics"
+    diagnostics.mkdir(exist_ok=True)
     source = Path(source).resolve(); meta = probe(source)
     video = next((s for s in meta["streams"] if s["codec_type"] == "video"), None)
     audio = next((s for s in meta["streams"] if s["codec_type"] == "audio"), None)
@@ -556,7 +558,7 @@ def export_video(source, folder, options, prefix="Film", recovering=False, previ
     else:
         enc = ["-c:v","libx264","-preset","fast","-crf","17","-threads","4"]
     tail = ["-pix_fmt","yuv420p","-fps_mode","passthrough","-enc_time_base:v","1:1000","-video_track_timescale","1000","-movie_timescale","1000","-movflags","+faststart","-progress","pipe:1",str(partial)]
-    log = folder / (prefix + "_encode.log")
+    log = diagnostics / (prefix + "_encode.log")
     try:
         run(cmd + enc + tail, log, "Rendering " + prefix, min(10,duration-start) if preview else duration)
     except RescueError:
@@ -584,8 +586,8 @@ def export_video(source, folder, options, prefix="Film", recovering=False, previ
         audio_same = stream_hash(source,"0:a:0") == stream_hash(partial,"0:a:0")
         if not audio_same: raise RescueError("The copied audio did not match the source.")
     run([tool("ffmpeg"),"-nostdin","-hide_banner","-v","error","-threads","4","-i",str(partial),"-map","0:v:0","-map","0:a:0?","-progress","pipe:1","-f","null","-"],
-        folder / (prefix + "_decode.log"), "Validating playback", float(out["format"]["duration"]))
-    if (folder / (prefix + "_decode.log")).read_text().strip():
+        diagnostics / (prefix + "_decode.log"), "Validating playback", float(out["format"]["duration"]))
+    if (diagnostics / (prefix + "_decode.log")).read_text().strip():
         raise RescueError("The exported video reported decoding errors. The partial file and logs were kept.")
     partial.rename(final)
     record = dict(file=str(final),source=str(source),preset=preset,preview=preview,
@@ -593,7 +595,7 @@ def export_video(source, folder, options, prefix="Film", recovering=False, previ
                   frames=ov.get("nb_frames"),audio_bitstream_identical=audio_same,
                   audio_ranges=click_ranges,hold_ranges=holds,hardware_encoder=hardware,
                   sha256=sha(final),source_sha256=sha(source),decode_errors=0)
-    dump(folder / (prefix + "_validation.json"),record)
+    dump(diagnostics / (prefix + "_validation.json"),record)
     return record
 
 
@@ -604,14 +606,34 @@ def project(destination):
     p.mkdir(); return p
 
 
+def write_summary(folder, report):
+    outputs = report.get("outputs", [])
+    lines = ["Recovery completed" if report.get("mode") != "video" else "Export completed", ""]
+    if report.get("mode") != "video":
+        recovery = report.get("recovery", {})
+        lines += [f"Video tracks saved: {len(report.get('extracted', []))}",
+                  f"Verified sectors: {recovery.get('verified_sectors', 0):,}",
+                  f"Uncertain sectors: {len(recovery.get('unresolved_lbas', [])):,}", ""]
+    if outputs:
+        lines += ["Playable videos:"] + [Path(item["file"]).name for item in outputs] + [""]
+    if report.get("mode") != "video":
+        lines += ["Recovery data/: raw disc reads, recovered images and original MPEG footage."]
+    lines += ["Diagnostics/: logs, checksums and verification reports."]
+    (Path(folder) / "Results.txt").write_text("\n".join(lines) + "\n")
+
+
 def job(config):
     mode = config.get("mode")
     if mode not in ("video","images","disc"): raise RescueError("Unknown task.")
     tool("ffmpeg"); tool("ffprobe")
-    p = project(config["destination"]); dump(p / "settings.json",config)
+    p = project(config["destination"])
+    diagnostics = p / "Diagnostics"; diagnostics.mkdir()
+    data = p / "Recovery data"
+    if mode != "video": data.mkdir()
+    dump(diagnostics / "settings.json",config)
     emit("project",path=str(p))
-    report = dict(status="running",mode=mode,project=str(p),outputs=[])
-    dump(p / "report.json",report)
+    report = dict(status="running",mode=mode,project=str(p),layout_version=2,outputs=[])
+    dump(diagnostics / "report.json",report)
     try:
         if mode == "video":
             sources = config.get("sources",[])
@@ -620,37 +642,37 @@ def job(config):
         else:
             paths = list(config.get("sources",[])); info = None
             if mode == "disc":
-                new, info = capture(config["device"],p,config.get("device_identity")); paths.insert(0,str(new))
-            best = p / "recovered.bin"
-            recovery = merge_images(paths,best,info["size"]//RAW if info else None)
+                new, info = capture(config["device"],data,config.get("device_identity"),diagnostics); paths.insert(0,str(new))
+            best = data / "recovered.bin"
+            recovery = merge_images(paths,best,info["size"]//RAW if info else None,diagnostics / "recovered.json")
             if info and config.get("retry",True):
-                patch = retry(info["device"],recovery,p,info["identity"])
+                patch = retry(info["device"],recovery,data,info["identity"],diagnostics)
                 if patch:
-                    best = p / "recovered_after_retry.bin"
-                    recovery = merge_images(paths + [patch],best,info["size"]//RAW)
+                    best = data / "recovered_after_retry.bin"
+                    recovery = merge_images(paths + [patch],best,info["size"]//RAW,diagnostics / "recovered_after_retry.json")
             report["recovery"] = recovery
             report["image"] = str(best)
             try: tracks = iso_tracks(best)
             except RescueError:
                 if config.get("cue"): tracks = cue_tracks(config["cue"],recovery["sectors"])
                 else: raise
-            extracted = extract_tracks(best,tracks,p / "Original MPEG streams")
+            extracted = extract_tracks(best,tracks,data / "Original video")
             report["extracted"] = extracted
-            dump(p / "report.json",report)
+            dump(diagnostics / "report.json",report)
             if config.get("export",True):
                 for i,item in enumerate(extracted,1):
                     report["outputs"].append(export_video(item["file"],p,dict(config,audio_ranges="",hold_ranges=""),prefix=f"Track_{i:02d}",recovering=True))
             uncertain = len(recovery["unresolved_lbas"])
             emit("recovery",verified=recovery["verified_sectors"],total=recovery["sectors"],uncertain=uncertain)
             if uncertain: emit("warning",message=f"{uncertain:,} sectors remain missing, unverified or conflicting. Some visible or audible damage may remain.")
-        report["status"] = "complete"; dump(p / "report.json",report)
-        (p / "READ ME.txt").write_text("Reel Rescue result\n\nOriginal sources were opened read-only. Generated files are stored in this new project.\nSee report.json for verification, uncertain sectors and output checksums.\nNo AI face reconstruction or invented voices were used.\nMissing footage cannot be guaranteed recoverable. A playable export may still contain source defects.\nKeep the original sources, recovered image and original MPEG streams for future recovery.\n")
-        (p / "SHA256SUMS.txt").write_text("".join(x["sha256"] + "  " + Path(x["file"]).name + "\n" for x in report["outputs"]))
+        report["status"] = "complete"; dump(diagnostics / "report.json",report)
+        write_summary(p, report)
+        (diagnostics / "SHA256SUMS.txt").write_text("".join(x["sha256"] + "  ../" + Path(x["file"]).name + "\n" for x in report["outputs"]))
         result = report["outputs"][0]["file"] if report["outputs"] else report.get("image",str(p))
         emit("complete",path=result,project=str(p),message="Finished and verified",report=report)
     except BaseException as e:
         report["status"] = "cancelled" if isinstance(e,Cancelled) else "failed"
-        report["error"] = str(e); dump(p / "report.json",report)
+        report["error"] = str(e); dump(diagnostics / "report.json",report)
         raise
 
 

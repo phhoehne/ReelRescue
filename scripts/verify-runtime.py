@@ -45,6 +45,10 @@ def main():
         hd=job(dict(mode='video',sources=[str(root/'input.mp4')],preset='share',enhance=False,hardware=False))['outputs'][0]
         assert (hd['width'],hd['height'])==(1920,1080)
         assert hd['audio_bitstream_identical']
+        for item in (native,hd):
+            project=Path(item['file']).parent
+            assert {x.name for x in project.iterdir()}=={'Film.mp4','Results.txt','Diagnostics'}
+            assert (project/'Diagnostics/report.json').exists()
         # Create a raw Mode 2 image using generated MPEG payload, then recover it.
         run(ffmpeg,'-v','error','-f','lavfi','-i','testsrc2=size=480x576:rate=25:duration=1',
             '-target','pal-svcd',root/'fixture.mpg')
@@ -59,6 +63,9 @@ def main():
         original=rescue.sha(image)
         recovered=job(dict(mode='images',sources=[str(image)],cue=str(cue),export=False))
         assert recovered['recovery']['unresolved_lbas']==[]
+        project=Path(recovered['project'])
+        assert {x.name for x in project.iterdir()}=={'Results.txt','Recovery data','Diagnostics'}
+        assert Path(recovered['image']).parent.name=='Recovery data'
         assert Path(recovered['extracted'][0]['file']).read_bytes().startswith(data)
         assert rescue.sha(image)==original
         run(runtime/'bin/ddrescue','-q','-n','-b','2352',image,root/'copy.bin',root/'copy.map')

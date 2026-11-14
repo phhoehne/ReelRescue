@@ -152,6 +152,29 @@ class VideoTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             return r.export_video(self.source,folder,dict(preset="native",enhance=False,hardware=False,**options))
 
+    def test_job_keeps_playable_video_separate_from_diagnostics(self):
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            r.job(dict(mode="video",sources=[str(self.source)],destination=str(self.folder),preset="native",enhance=False,hardware=False))
+        event=json.loads(output.getvalue().splitlines()[-1]);p=Path(event["project"])
+        self.assertEqual({x.name for x in p.iterdir()},{"Film.mp4","Results.txt","Diagnostics"})
+        self.assertTrue((p/"Diagnostics/Film_encode.log").exists())
+        self.assertTrue((p/"Diagnostics/Film_decode.command.json").exists())
+        self.assertTrue((p/"Diagnostics/Film_validation.json").exists())
+        report=json.loads((p/"Diagnostics/report.json").read_text())
+        self.assertEqual(report["layout_version"],2)
+        self.assertEqual(report["status"],"complete")
+        self.assertTrue(report["outputs"][0]["audio_bitstream_identical"])
+
+    def test_failed_recovery_keeps_diagnostics_and_source(self):
+        source=self.folder/"bad-image.bin";source.write_bytes(b"unreadable source")
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaises(r.RescueError):
+                r.job(dict(mode="images",sources=[str(source)],destination=str(self.folder)))
+        p=Path(json.loads(output.getvalue().splitlines()[0])["path"])
+        self.assertEqual(json.loads((p/"Diagnostics/report.json").read_text())["status"],"failed")
+        self.assertTrue((p/"Recovery data").is_dir())
+        self.assertEqual(source.read_bytes(),b"unreadable source")
+
     def test_native_geometry_chapters_audio_and_frame_count(self):
         result = self.export("native")
         self.assertEqual((result["width"],result["height"]),(768,576))
