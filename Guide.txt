@@ -82,14 +82,13 @@ validation records and SHA256 checksums. Partial files are clearly named.
 Keep originals and raw recoveries even after producing a good viewing copy.
 
 REQUIREMENTS
-This build is for Apple Silicon Macs running macOS 14 or later. It is a local,
-ad-hoc signed personal build, not a notarized App Store release. Python 3,
-FFmpeg and ffprobe must be installed separately; ddrescue is only needed for
-reading physical CDs. Install these tools before running the app.
-With Homebrew installed: brew install python ffmpeg ddrescue
-No dependencies are downloaded automatically. Help & setup shows readiness.
-If hardware encoding is unavailable, a software H.264/H.265 fallback runs
-more slowly and may produce a different file size at comparable quality.
+Apple Silicon Mac, macOS 14 or later. Python, FFmpeg, ffprobe and GNU ddrescue
+are built into the app. No Homebrew or Terminal commands are needed to use it.
+Help & setup lists built-in tools. If any are missing, reinstall the complete
+app download. Source builds have separate developer requirements in README.md.
+An optical drive is required only for physical CD recovery.
+Third-party licenses are available from Help & setup. Matching dependency-source
+archives must accompany distributed app releases.
 
 SOURCE AND REBUILD
 native/ReelRescue.swift is the SwiftUI interface.

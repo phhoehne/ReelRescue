@@ -52,12 +52,17 @@ def cancel(signum, frame):
 
 
 def tool(name, required=True):
-    candidates = [shutil.which(name), f"/opt/homebrew/bin/{name}", f"/usr/local/bin/{name}", f"/usr/bin/{name}"]
+    runtime = Path(sys.executable).resolve().parent.parent
+    bundled = runtime / "bin" / name
+    if getattr(sys, "frozen", False):
+        candidates = [str(bundled)]
+    else:
+        candidates = [str(Path(os.environ.get("REEL_RESCUE_TOOL_DIR", HERE / "../build/vendor/payload/bin")) / name), shutil.which(name), f"/opt/homebrew/bin/{name}", f"/usr/local/bin/{name}", f"/usr/bin/{name}"]
     for p in candidates:
         if p and os.path.isfile(p) and os.access(p, os.X_OK):
             return p
     if required:
-        raise RescueError(f"{name} is missing. Install it using the instructions in Help, then reopen Reel Rescue.")
+        raise RescueError(f"The built-in {name} tool is missing. Reinstall Reel Rescue from a complete release download.")
     return None
 
 

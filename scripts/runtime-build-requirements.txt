@@ -1,0 +1,7 @@
+altgraph==0.17.5
+cmake==3.31.10
+macholib==1.16.4
+packaging==26.3
+pyinstaller==6.16.0
+pyinstaller-hooks-contrib==2026.10
+setuptools==84.2.1

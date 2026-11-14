@@ -2,6 +2,10 @@
 
 ## 1.1.0 — Unreleased
 
+- Bundle the recovery engine, Python runtime, FFmpeg/ffprobe and ddrescue.
+- Remove Homebrew and Terminal setup from the end-user flow.
+- Build bundled media tools for macOS 14 arm64; include licenses and matching source archives.
+
 - Unify CD drive and local file recovery on one screen.
 - Fix detection of optical media reported with macOS WholeDisk metadata.
 - Refresh inserted media automatically and explain unsupported media or inspection failures.
@@ -13,5 +17,5 @@
 - Add a native Xcode project with signing configuration.
 - Add shared app versioning and local release packaging with SHA-256 checksums.
 
-This is the first planned public release. Current local packages are ad-hoc signed;
-Developer ID signing and notarization are pending.
+This is the first planned public release. Developer ID signing is configured locally. Each final build is notarized and
+verified separately before publication.

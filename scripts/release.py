@@ -25,7 +25,10 @@ def main():
     subprocess.run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(app), str(temporary)], check=True)
     temporary.replace(archive)
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    (folder / "SHA256SUMS.txt").write_text(f"{digest}  {archive.name}\n")
+    subprocess.run(["python3",str(ROOT/"scripts/source-bundle.py"),str(folder),version,str(build)],check=True)
+    sources = folder / f"ReelRescue-{version}-build{build}-dependency-sources.zip"
+    source_digest = hashlib.sha256(sources.read_bytes()).hexdigest()
+    (folder / "SHA256SUMS.txt").write_text(f"{digest}  {archive.name}\n{source_digest}  {sources.name}\n")
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip())
     signature = subprocess.run(["codesign", "-dvv", str(app)], capture_output=True, text=True, check=True).stderr
@@ -34,7 +37,8 @@ def main():
         archive=archive.name, sha256=digest, architecture="arm64", minimum_macos="14.0",
         ad_hoc_signed="Signature=adhoc" in signature,
         notarization="Not checked by this packaging tool",
-        runtime_dependencies=["Python 3", "FFmpeg/ffprobe", "GNU ddrescue for physical CD capture"]), indent=2) + "\n")
+        runtime_dependencies=[], dependency_sources=sources.name, dependency_sources_sha256=source_digest,
+        bundled_tools=dict(python="3.12.10",ffmpeg="8.0.1",ffprobe="8.0.1",ddrescue="1.30",x265="4.1",x264="stable (archive SHA-256 in Config/RuntimeSources.json)")), indent=2) + "\n")
     print(f"Release assets: {folder}")
     if dirty:
         print("Local preview package: source has uncommitted changes. Commit and rebuild before publishing.")

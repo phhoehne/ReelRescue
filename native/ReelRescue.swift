@@ -57,6 +57,8 @@ final class Model: ObservableObject {
     @Published var showLog = false
     var process: Process?
     var python: String?
+    var bundledEngine: String { Bundle.main.resourceURL!.appendingPathComponent("runtime/engine/ReelRescueEngine").path }
+    func engineArguments(_ args: [String]) -> [String] { args }
     var backend: String { Bundle.main.resourceURL!.appendingPathComponent("backend/reel_rescue.py").path }
     var ready: Bool { python != nil && tools["ffmpeg"] != nil && tools["ffprobe"] != nil }
     var canRun: Bool {
@@ -65,7 +67,7 @@ final class Model: ObservableObject {
 
     init() {
         let fm = FileManager.default
-        let candidates = ["/Library/Frameworks/Python.framework/Versions/Current/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3"]
+        let candidates = [bundledEngine]
         python = candidates.first(where: fm.isExecutableFile(atPath:))
         if !fm.fileExists(atPath: destination.path) { destination = fm.homeDirectoryForCurrentUser.appendingPathComponent("Desktop") }
         checkTools()
@@ -98,10 +100,9 @@ final class Model: ObservableObject {
 
     func invoke(_ args: [String], completion: @escaping (Data) -> Void) {
         guard let py = python else { return }
-        let script = backend
         DispatchQueue.global(qos: .userInitiated).async {
             let p = Process(), pipe = Pipe()
-            p.executableURL = URL(fileURLWithPath: py); p.arguments = [script] + args
+            p.executableURL = URL(fileURLWithPath: py); p.arguments = self.engineArguments(args)
             p.standardOutput = pipe; p.standardError = FileHandle.nullDevice
             do {
                 try p.run(); let data = pipe.fileHandleForReading.readDataToEndOfFile(); p.waitUntilExit()
@@ -111,14 +112,14 @@ final class Model: ObservableObject {
     }
 
     func checkTools() {
-        guard python != nil else { dependencyMessage = "Python 3 is missing. Open Help for setup."; return }
+        guard python != nil else { dependencyMessage = "The built-in recovery engine is missing. Reinstall the app."; return }
         invoke(["doctor"]) { data in
             guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let found = obj["tools"] as? [String: Any] else {
-                self.dependencyMessage = "Could not start the recovery engine. Open Help for setup."; return
+                self.dependencyMessage = "Could not start the built-in recovery engine. Reinstall the app."; return
             }
             self.tools = found.compactMapValues { $0 as? String }
-            self.dependencyMessage = self.ready ? "Video tools are ready" : "FFmpeg or ffprobe is missing. Open Help for setup."
+            self.dependencyMessage = self.ready ? "Built-in tools are ready" : "A built-in video tool is missing. Reinstall the app."
         }
     }
 
@@ -200,7 +201,7 @@ final class Model: ObservableObject {
         do { try JSONSerialization.data(withJSONObject: settings, options: .prettyPrinted).write(to: request) }
         catch { self.error = error.localizedDescription; busy = false; return }
         let p = Process(), output = Pipe()
-        p.executableURL = URL(fileURLWithPath: py); p.arguments = [backend, "job", request.path]
+        p.executableURL = URL(fileURLWithPath: py); p.arguments = engineArguments(["job", request.path])
         p.standardOutput = output; p.standardError = output
         p.environment = ProcessInfo.processInfo.environment.merging(["PYTHONUNBUFFERED": "1", "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"]) { _, v in v }
         process = p
@@ -424,7 +425,7 @@ struct ContentView: View {
                 Label(m.driveMessage, systemImage: m.drives.isEmpty ? "info.circle" : "checkmark.circle")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if m.tools["ddrescue"] == nil && m.ready {
-                    Text("Reading a physical CD requires GNU ddrescue. Open Help & setup to install it.").font(.caption).foregroundStyle(.orange)
+                    Text("The built-in CD reading tool is missing. Reinstall the app.").font(.caption).foregroundStyle(.orange)
                 }
                 DisclosureGroup("Add earlier reads of this disc (optional)", isExpanded: $earlierReadsExpanded) {
                     sourceFiles.padding(.top, 12)
@@ -587,13 +588,15 @@ struct ContentView: View {
             Text("Recover footage from damaged discs").font(.system(size: 25, weight: .semibold, design: .rounded)).foregroundStyle(ink)
             Text("Reel Rescue reads damaged VCDs and SVCDs, combines intact data from multiple reads, and saves the footage with a report of remaining damage. Picture cleanup, audio repair and sharing exports are optional steps after recovery.")
             Divider()
-            Text("Local tools").font(.headline)
+            Text("Built-in tools").font(.headline)
             ForEach(["ffmpeg", "ffprobe", "ddrescue"], id: \.self) { name in
-                HStack { Image(systemName: m.tools[name] != nil ? "checkmark.circle.fill" : "exclamationmark.circle").foregroundStyle(m.tools[name] != nil ? accent : .orange); Text(name); Spacer(); Text(m.tools[name] ?? "Not installed").font(.caption).foregroundStyle(.secondary) }
+                HStack { Image(systemName: m.tools[name] != nil ? "checkmark.circle.fill" : "exclamationmark.circle").foregroundStyle(m.tools[name] != nil ? accent : .orange); Text(name); Spacer(); Text(m.tools[name] ?? "Unavailable").font(.caption).foregroundStyle(.secondary) }
             }
-            Text("This personal Mac build uses Python 3 and your installed FFmpeg tools. GNU ddrescue is only needed for reading a physical CD. Tools are not downloaded automatically.").font(.callout).foregroundStyle(.secondary)
-            Text("With Homebrew installed, run this in Terminal:").font(.callout)
-            Text("brew install python ffmpeg ddrescue").font(.system(.body, design: .monospaced)).textSelection(.enabled).padding(12).frame(maxWidth: .infinity, alignment: .leading).background(mist, in: RoundedRectangle(cornerRadius: 8))
+            Text("Reel Rescue includes its recovery engine, FFmpeg, ffprobe and GNU ddrescue. No Homebrew, Python installation or Terminal setup is needed. All footage is processed locally.").font(.callout).foregroundStyle(.secondary)
+            Text("If a built-in tool cannot be started, download a fresh copy of the app. Include the message from Task details when reporting a problem.").font(.callout).foregroundStyle(.secondary)
+            Button("Open third-party licenses") {
+                if let url = Bundle.main.resourceURL?.appendingPathComponent("runtime/licenses") { NSWorkspace.shared.open(url) }
+            }
             Text("Recovery accepts whole-disc 2,352-byte raw CD images, even when named .iso. Standard ISO/DVD/Blu-ray images and multi-file CUE layouts are not supported. Combine reads only from the same physical disc.").font(.callout).foregroundStyle(.secondary)
             HStack {
                 Button("Recheck tools", action: m.checkTools)

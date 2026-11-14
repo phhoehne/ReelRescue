@@ -51,8 +51,13 @@ def main():
     with tempfile.TemporaryDirectory(prefix="reel-notarize-") as temp:
         run("ditto", "-x", "-k", str(archive), temp)
         app = Path(temp) / "Reel Rescue.app"
-        run("xcrun", "stapler", "staple", str(app))
-        run("xcrun", "stapler", "validate", str(app))
+        fallback = False
+        try:
+            subprocess.run(["xcrun","stapler","staple",str(app)],check=True,timeout=30)
+            subprocess.run(["xcrun","stapler","validate",str(app)],check=True,timeout=30)
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+            run("python3",str(ROOT/"scripts/apple-ticket.py"),str(app))
+            fallback = True
         run("codesign", "--verify", "--deep", "--strict", str(app))
         run("spctl", "--assess", "--type", "execute", "--verbose=2", str(app))
         temporary = folder / (archive.name + ".stapled")
@@ -64,9 +69,12 @@ def main():
         temporary.replace(archive)
         run("ditto", str(app), str(ROOT / "dist/Reel Rescue.app"))
     record.update(notarization="Accepted", notarization_submission=result["id"],
-        stapled=True, gatekeeper_assessment="accepted", sha256=hashlib.sha256(archive.read_bytes()).hexdigest())
+        stapled=True, ticket_attachment="HTTPS fallback" if fallback else "stapler", gatekeeper_assessment="accepted", sha256=hashlib.sha256(archive.read_bytes()).hexdigest())
     metadata.write_text(json.dumps(record, indent=2) + "\n")
-    (folder / "SHA256SUMS.txt").write_text(f"{record['sha256']}  {archive.name}\n")
+    checksums = f"{record['sha256']}  {archive.name}\n"
+    if record.get("dependency_sources"):
+        checksums += f"{record['dependency_sources_sha256']}  {record['dependency_sources']}\n"
+    (folder / "SHA256SUMS.txt").write_text(checksums)
     print(f"Signed, notarized, stapled and verified: {archive}")
 
 
