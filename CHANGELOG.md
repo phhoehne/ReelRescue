@@ -2,6 +2,9 @@
 
 ## 1.1.0 — Unreleased
 
+- Simplify the sidebar and rename enhancement tools to Enhance footage.
+- Automatically load the latest recovered track when opening enhancement.
+
 - Bundle the recovery engine, Python runtime, FFmpeg/ffprobe and ddrescue.
 - Remove Homebrew and Terminal setup from the end-user flow.
 - Build bundled media tools for macOS 14 arm64; include licenses and matching source archives.

@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import AppKit
 import AVKit
 import UniformTypeIdentifiers
@@ -9,7 +10,7 @@ private let mist = Color(red: 0.94, green: 0.96, blue: 0.97)
 
 enum Workflow: String, CaseIterable {
     case recovery = "Recover footage"
-    case video = "Clean up & share"
+    case video = "Enhance footage"
     var symbol: String { self == .video ? "film" : "opticaldisc" }
 }
 
@@ -35,8 +36,8 @@ final class Model: ObservableObject {
     @Published var holdRanges = ""
     @Published var previewStart = "0:00"
     @Published var busy = false
-    @Published var phase = "Ready when you are"
-    @Published var detail = "Insert your damaged CD, or choose saved disc reads."
+    @Published var phase = "Ready"
+    @Published var detail = ""
     @Published var fraction: Double?
     @Published var warning = ""
     @Published var error = ""
@@ -45,6 +46,9 @@ final class Model: ObservableObject {
     @Published var result: URL?
     @Published var recoveredVideos: [URL] = []
     @Published var selectedRecoveredVideo = ""
+    @Published var latestRecoveredVideos: [URL] = []
+    @Published var latestRecoveredSelection: URL?
+    private var previousEnhancementSource: URL?
     @Published var recoveryVerified: Int?
     @Published var recoveryUncertain = 0
     @Published var player: AVPlayer?
@@ -83,14 +87,27 @@ final class Model: ObservableObject {
     }
 
     func selectWorkflow(_ next: Workflow, video: URL? = nil) {
-        guard !busy else { return }
+        guard !busy, next != workflow || video != nil else { return }
+        if workflow == .recovery, !recoveredVideos.isEmpty {
+            latestRecoveredSelection = recoveredVideos.first(where: { $0.path == selectedRecoveredVideo }) ?? recoveredVideos.first
+        }
+        if workflow == .video { previousEnhancementSource = sources.first }
+        let defaultVideo = video ?? latestRecoveredSelection ?? previousEnhancementSource
         player?.pause(); player = nil; sources = []; cue = nil; result = nil
         audioRanges = ""; holdRanges = ""; error = ""; warning = ""; fraction = nil
         recoveryVerified = nil; recoveryUncertain = 0; recoveredVideos = []; selectedRecoveredVideo = ""
-        workflow = next; phase = "Ready when you are"
-        detail = next == .video ? "Choose recovered footage to review, clean up or share." : "Choose a source to start recovering your footage."
-        if let video { add([video]) }
+        workflow = next; phase = "Ready"
+        detail = ""
+        if next == .video, let defaultVideo, FileManager.default.fileExists(atPath: defaultVideo.path) {
+            add([defaultVideo])
+        }
         if next == .recovery { refreshDrives() }
+    }
+
+    func selectRecoveredTrack(_ path: String) {
+        guard !busy, let url = latestRecoveredVideos.first(where: { $0.path == path }) else { return }
+        latestRecoveredSelection = url
+        add([url])
     }
 
     func reviewRecovered() {
@@ -144,8 +161,8 @@ final class Model: ObservableObject {
 
     func changeRecoverySource() {
         result = nil; error = ""; warning = ""; fraction = nil
-        recoveryVerified = nil; recoveredVideos = []; phase = "Ready when you are"
-        detail = recoverySource == .disc ? "Select your inserted CD to start recovery." : "Choose saved raw disc reads to recover."
+        recoveryVerified = nil; recoveredVideos = []; phase = "Ready"
+        detail = ""
         if recoverySource == .disc { refreshDrives() }
     }
 
@@ -169,7 +186,7 @@ final class Model: ObservableObject {
             }
         }
         error = ""; result = nil; recoveryVerified = nil; recoveredVideos = []
-        detail = workflow == .video ? "Review your footage, then choose any cleanup or sharing options." : "Your disc reads are ready to compare."
+        detail = ""
     }
 
     func chooseCue() {
@@ -185,7 +202,7 @@ final class Model: ObservableObject {
 
     func start(preview: Bool = false) {
         guard canRun, let py = python else { return }
-        player?.pause(); busy = true; phase = "Preparing"; detail = "Creating a separate output project"
+        player?.pause(); busy = true; phase = "Preparing"; detail = ""
         error = ""; warning = ""; log = ""; fraction = nil; project = nil; result = nil
         recoveryVerified = nil; recoveryUncertain = 0; recoveredVideos = []; selectedRecoveredVideo = ""
         var settings: [String: Any] = ["mode": jobMode, "sources": sources.map(\.path), "destination": destination.path,
@@ -252,8 +269,10 @@ final class Model: ObservableObject {
                 let originals = report["extracted"] as? [[String: Any]] ?? []
                 recoveredVideos = (copies.isEmpty ? originals : copies).compactMap { ($0["file"] as? String).map { URL(fileURLWithPath: $0) } }
                 selectedRecoveredVideo = recoveredVideos.first?.path ?? ""
-                detail = "Your recovered image, original footage and recovery report are saved."
-            } else { detail = "Your viewing copy and validation report are saved in the new project folder." }
+                latestRecoveredVideos = recoveredVideos
+                latestRecoveredSelection = recoveredVideos.first
+                detail = ""
+            } else { detail = "" }
         case "cancelled": phase = "Stopped"; detail = e["message"] as? String ?? ""; fraction = nil
         case "error": phase = "Needs attention"; error = e["message"] as? String ?? "The task failed."; fraction = nil
         default: break
@@ -297,7 +316,6 @@ struct ContentView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
                         header
-                        if m.workflow != .video { recoveryOverview }
                         sourceArea
                         if m.workflow != .video && m.result != nil { recoveryResults }
                         options
@@ -325,19 +343,10 @@ struct ContentView: View {
 
     var sidebar: some View {
         VStack(alignment: .leading, spacing: 26) {
-            VStack(alignment: .leading, spacing: 12) {
-                Image(systemName: "opticaldisc").font(.system(size: 43)).foregroundStyle(accent)
-                Text("Reel Rescue").font(.system(size: 23, weight: .semibold, design: .rounded)).foregroundStyle(ink)
-                Text("Recover memories\nfrom damaged discs.").font(.callout).foregroundStyle(.secondary).lineSpacing(3)
-            }.padding(.top, 22)
             VStack(spacing: 6) {
                 ForEach(Workflow.allCases, id: \.self) { workflow in
-                    if workflow == .recovery {
-                        Text("Recover footage").font(.caption.weight(.semibold)).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.bottom, 6)
-                    }
                     if workflow == .video {
                         Divider().padding(.vertical, 15)
-                        Text("After recovery").font(.caption.weight(.semibold)).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.bottom, 6)
                     }
                     Button { m.selectWorkflow(workflow) } label: {
                         HStack(spacing: 10) {
@@ -351,7 +360,6 @@ struct ContentView: View {
                 }
             }
             Spacer()
-            Label("Processed on your Mac", systemImage: "desktopcomputer").font(.caption).foregroundStyle(.secondary)
             Button { m.showHelp = true } label: { Label("Help & setup", systemImage: "questionmark.circle") }.buttonStyle(.plain)
             Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"))").font(.caption2).foregroundStyle(.secondary)
         }.padding(20).background(mist)
@@ -359,41 +367,23 @@ struct ContentView: View {
 
     var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(m.workflow == .video ? "Clean up & share recovered footage" : "Recover footage from a damaged disc").font(.system(size: 30, weight: .semibold, design: .rounded)).foregroundStyle(ink)
-            Text(m.workflow == .video ? "Review what you recovered. Make optional picture, sound and sharing improvements." : "Bring back footage from damaged Video CDs and Super Video CDs—even when they won’t mount or play normally.")
-                .font(.body).foregroundStyle(.secondary)
+            Text(m.workflow.rawValue).font(.system(size: 30, weight: .semibold, design: .rounded)).foregroundStyle(ink)
             if !m.ready { Label(m.dependencyMessage, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
         }
     }
 
-    var recoveryOverview: some View {
-        HStack(alignment: .top, spacing: 24) {
-            recoveryStep("Read safely", "Keep the original disc and source files untouched.", "opticaldisc")
-            recoveryStep("Recover more", "Compare saved reads and keep checksum-verified data.", "square.stack.3d.up")
-            recoveryStep("See what survived", "Save the footage and identify damage that remains.", "film.stack")
-        }.padding(18).background(mist, in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    func recoveryStep(_ title: String, _ detail: String, _ icon: String) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Label(title, systemImage: icon).font(.callout.weight(.semibold)).foregroundStyle(accent)
-            Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        }.frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     var recoveryResults: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("What we recovered").font(.headline).foregroundStyle(ink)
+            Text("Recovery results").font(.headline).foregroundStyle(ink)
             Text(m.recoveredVideos.count == 1 ? "1 video track saved" : "\(m.recoveredVideos.count) video tracks saved").font(.title3.weight(.semibold))
             if let verified = m.recoveryVerified {
                 Text("\(verified.formatted()) sectors verified · \(m.recoveryUncertain.formatted()) still uncertain").foregroundStyle(.secondary)
             }
-            Text("Review the saved footage for visible or audible damage. Cleanup and sharing are optional next steps.").font(.callout).foregroundStyle(.secondary)
             if !m.recoveredVideos.isEmpty {
                 Picker("Track to review", selection: $m.selectedRecoveredVideo) {
                     ForEach(m.recoveredVideos, id: \.path) { url in Text(url.lastPathComponent).tag(url.path) }
                 }
-                Button("Review & clean up this track", action: m.reviewRecovered)
+                Button("Enhance this track", action: m.reviewRecovered)
             }
         }.padding(18).frame(maxWidth: .infinity, alignment: .leading).background(mist, in: RoundedRectangle(cornerRadius: 10))
     }
@@ -422,8 +412,10 @@ struct ContentView: View {
                         }
                     }
                 }
-                Label(m.driveMessage, systemImage: m.drives.isEmpty ? "info.circle" : "checkmark.circle")
-                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if m.drives.isEmpty {
+                    Label(m.driveMessage, systemImage: "info.circle")
+                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
                 if m.tools["ddrescue"] == nil && m.ready {
                     Text("The built-in CD reading tool is missing. Reinstall the app.").font(.caption).foregroundStyle(.orange)
                 }
@@ -436,6 +428,19 @@ struct ContentView: View {
 
     var sourceFiles: some View {
         VStack(alignment: .leading, spacing: 14) {
+            if m.workflow == .video && m.latestRecoveredVideos.count > 1 {
+                Picker("Recovered track", selection: Binding(
+                    get: { m.sources.first?.path ?? "" },
+                    set: { m.selectRecoveredTrack($0) }
+                )) {
+                    if let source = m.sources.first, !m.latestRecoveredVideos.contains(source) {
+                        Text(source.lastPathComponent).tag(source.path)
+                    }
+                    ForEach(m.latestRecoveredVideos, id: \.path) { url in
+                        Text(url.lastPathComponent).tag(url.path)
+                    }
+                }
+            }
             if m.workflow == .video, let player = m.player, !m.sources.isEmpty {
                 NativeVideoPlayer(player: player).frame(height: 235).background(.black).clipShape(RoundedRectangle(cornerRadius: 9))
                 HStack { Image(systemName: "film"); Text(m.sources[0].lastPathComponent).lineLimit(1).truncationMode(.middle); Spacer(); Button("Change video", action: m.chooseSource) }
@@ -443,7 +448,7 @@ struct ContentView: View {
                 VStack(spacing: 12) {
                     Image(systemName: m.workflow == .video ? "film.stack" : "opticaldisc").font(.system(size: 32, weight: .light)).foregroundStyle(accent)
                     Text(m.workflow == .video ? "Drop a video here" : m.usesDrive ? "Add earlier reads, if you have them" : "Drop images from the same CD here").font(.headline)
-                    Text(m.workflow == .video ? "MP4, M4V, MPEG, MOV and other FFmpeg-readable videos" : "Raw .bin or .iso images • optional single-file .cue sheet")
+                    Text(m.workflow == .video ? "MP4, M4V, MPEG, MOV" : "Raw .bin or .iso")
                         .font(.callout).foregroundStyle(.secondary)
                     Button(m.workflow == .video ? "Choose video…" : "Choose images…", action: m.chooseSource).controlSize(.large)
                 }.frame(maxWidth: .infinity).padding(24)
@@ -467,7 +472,6 @@ struct ContentView: View {
                     if let cue = m.cue { Text(cue.lastPathComponent).font(.caption).lineLimit(1); Button { m.cue = nil } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain) }
                     Spacer()
                 }
-                Text("Track boundaries are read from the disc directory. A CUE sheet is only needed when that directory is damaged.").font(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -478,17 +482,14 @@ struct ContentView: View {
             if m.workflow != .video {
                 Text("Recovery settings").font(.headline).foregroundStyle(ink)
                 if m.usesDrive { Toggle("Retry uncertain sectors twice", isOn: $m.retry) }
-                Label("Preserve the recovered disc image and original video streams", systemImage: "checkmark.shield").font(.callout)
-                Text("Compare reads from the same disc to recover more intact data. Missing or conflicting sectors are listed in your recovery report.").font(.caption).foregroundStyle(.secondary)
-                DisclosureGroup("After recovery: make a viewing copy", isExpanded: $copiesExpanded) {
+                DisclosureGroup("Viewing copy", isExpanded: $copiesExpanded) {
                     VStack(alignment: .leading, spacing: 14) {
                         Toggle("Also create playable videos", isOn: $m.makeVideos)
                         exportOptions.disabled(!m.makeVideos)
                     }.padding(.top, 12)
                 }
-                Text(m.makeVideos ? "A playable copy will also be made. Cleanup and 1080p sharing options are available above or after recovery." : "Only recovered source footage will be saved. You can make viewing copies later.").font(.caption).foregroundStyle(.secondary)
             } else {
-                Text("Optional viewing copy").font(.headline).foregroundStyle(ink)
+                Text("Output").font(.headline).foregroundStyle(ink)
                 exportOptions
                 repairOptions
             }
@@ -499,21 +500,17 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 14) {
             Picker("Format", selection: $m.preset) {
                 Text("Original display size · H.264").tag("native")
-                Text("1080p sharing copy · H.265").tag("share")
+                Text("1080p compact copy · H.265").tag("share")
                 Text("1080p high-quality copy · H.264").tag("hd")
             }.pickerStyle(.menu)
-            Text(m.preset == "share" ? "Smaller files, natural appearance. Requires an HEVC-compatible player." : m.preset == "hd" ? "A larger, broadly compatible viewing copy." : "Preserves the source's display size with square pixels.")
-                .font(.caption).foregroundStyle(.secondary)
             Toggle("Add gentle noise reduction and sharpening", isOn: $m.enhance)
-            Text("Leave this off for footage that is already enhanced. No face reconstruction or beauty filters are used.")
-                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
     var repairOptions: some View {
                 DisclosureGroup("Repair specific moments (optional)", isExpanded: $repairsExpanded) {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Mark only moments you have reviewed in the player. Use start-end, one range per line. Missing words and pictures cannot be faithfully recreated.").font(.caption).foregroundStyle(.secondary)
+                        Text("One start-end range per line.").font(.caption).foregroundStyle(.secondary)
                         HStack(alignment: .top, spacing: 18) {
                             VStack(alignment: .leading) {
                                 Text("Reduce audio clicks").font(.subheadline.weight(.medium))
@@ -534,7 +531,6 @@ struct ContentView: View {
             Divider()
             HStack { Text(m.workflow == .video ? "Save viewing copies in" : "Save recovery projects in").font(.headline); Spacer(); Button("Choose folder…", action: m.chooseDestination) }
             Label(m.destination.path, systemImage: "folder").font(.callout).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-            Text("Each run creates a new folder. Source files are never overwritten.").font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -550,7 +546,7 @@ struct ContentView: View {
             HStack(alignment: .center, spacing: 18) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(m.phase).font(.headline)
-                    Text(m.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    if !m.detail.isEmpty { Text(m.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
                     if m.busy {
                         if let f = m.fraction { ProgressView(value: f).frame(maxWidth: 340) }
                         else { ProgressView().controlSize(.small) }
@@ -565,7 +561,7 @@ struct ContentView: View {
                     } else {
                         Button("Open recovery folder", action: m.revealProject).buttonStyle(.borderedProminent).controlSize(.large)
                     }
-                    Button(m.workflow == .video ? "New copy" : "New recovery") { m.result = nil; m.recoveryVerified = nil; m.recoveredVideos = []; m.phase = "Ready when you are"; m.detail = "Adjust the settings, then start again." }
+                    Button(m.workflow == .video ? "New copy" : "New recovery") { m.result = nil; m.recoveryVerified = nil; m.recoveredVideos = []; m.phase = "Ready"; m.detail = "" }
                 } else {
                     if m.workflow == .video {
                         VStack(spacing: 5) {
@@ -585,19 +581,15 @@ struct ContentView: View {
 
     var help: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Recover footage from damaged discs").font(.system(size: 25, weight: .semibold, design: .rounded)).foregroundStyle(ink)
-            Text("Reel Rescue reads damaged VCDs and SVCDs, combines intact data from multiple reads, and saves the footage with a report of remaining damage. Picture cleanup, audio repair and sharing exports are optional steps after recovery.")
+            Text("Help & setup").font(.system(size: 25, weight: .semibold, design: .rounded)).foregroundStyle(ink)
             Divider()
             Text("Built-in tools").font(.headline)
             ForEach(["ffmpeg", "ffprobe", "ddrescue"], id: \.self) { name in
                 HStack { Image(systemName: m.tools[name] != nil ? "checkmark.circle.fill" : "exclamationmark.circle").foregroundStyle(m.tools[name] != nil ? accent : .orange); Text(name); Spacer(); Text(m.tools[name] ?? "Unavailable").font(.caption).foregroundStyle(.secondary) }
             }
-            Text("Reel Rescue includes its recovery engine, FFmpeg, ffprobe and GNU ddrescue. No Homebrew, Python installation or Terminal setup is needed. All footage is processed locally.").font(.callout).foregroundStyle(.secondary)
-            Text("If a built-in tool cannot be started, download a fresh copy of the app. Include the message from Task details when reporting a problem.").font(.callout).foregroundStyle(.secondary)
             Button("Open third-party licenses") {
                 if let url = Bundle.main.resourceURL?.appendingPathComponent("runtime/licenses") { NSWorkspace.shared.open(url) }
             }
-            Text("Recovery accepts whole-disc 2,352-byte raw CD images, even when named .iso. Standard ISO/DVD/Blu-ray images and multi-file CUE layouts are not supported. Combine reads only from the same physical disc.").font(.callout).foregroundStyle(.secondary)
             HStack {
                 Button("Recheck tools", action: m.checkTools)
                 Button("Open guide") { if let url = Bundle.main.url(forResource: "Guide", withExtension: "txt") { NSWorkspace.shared.open(url) } }

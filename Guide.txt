@@ -15,13 +15,13 @@ recovery or reconstruct footage that is completely missing.
 
 When recovery finishes, “What we recovered” shows saved tracks, verified
 sectors and remaining uncertainty. Open the recovery folder to inspect all
-files. Choose a track and “Review & clean up this track” for optional picture,
+files. Choose a track and “Enhance this track” for optional picture,
 sound or sharing improvements.
 
 A playable copy at the original display size is enabled by default. Expand
 “After recovery: make a viewing copy” to turn it off or choose another format.
 Enhancement is OFF by default. Cleanup, audio repairs and 1080p H.265 sharing
-remain available separately under “After recovery → Clean up & share”.
+remain available separately under “After recovery → Enhance footage”.
 
 RECOVER AN INSERTED CD
 Insert the CD and refresh the drive list. Only whole, read-only optical media
@@ -52,7 +52,7 @@ damaged, add the original single-file Mode 2/2352 CUE sheet. Do not invent
 track boundaries. Original MPEG payloads, a recovered raw image, reports and
 optional playable exports are kept together. Separate tracks remain separate
 videos in this version. To inspect or enhance one further, open its MPEG or
-viewing copy in Clean up & share.
+viewing copy in Enhance footage.
 
 OPTIONAL CLEANUP AND SHARING
 • Drop a video in the window, or use Choose video / Command-O.

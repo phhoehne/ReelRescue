@@ -74,9 +74,9 @@ An `.iso` extension alone does not identify the sector format. Recovery currentl
 
 ### Review and optionally improve
 
-When recovery finishes, the app shows saved tracks, verified sectors, and remaining uncertainty. Open the recovery folder to inspect the files, or choose a track and select **Review & clean up this track**.
+When recovery finishes, the app shows saved tracks, verified sectors, and remaining uncertainty. Open the recovery folder to inspect the files, or choose a track and select **Enhance this track**.
 
-A playable copy at the original display size is enabled by default. Expand **After recovery: make a viewing copy** to change its format or disable it. Picture cleanup, timed sound repairs, and 1080p sharing exports are also available under **Clean up & share**.
+A playable copy at the original display size is enabled by default. Expand **After recovery: make a viewing copy** to change its format or disable it. Picture cleanup, timed sound repairs, and 1080p sharing exports are also available under **Enhance footage**.
 
 See [the user guide](Guide.txt) for repair-range syntax, stopping behavior, and more detail about saved files.
 
@@ -107,6 +107,11 @@ Config/                Signing configuration and local override example
 tests/                 Recovery and video-processing tests
 Guide.txt              User instructions
 ```
+
+After recovery, **Enhance footage** automatically loads the latest recovered
+track. A selected recovery track becomes the default; multiple tracks can be
+switched in the enhancement screen. The app keeps navigation and processing
+controls concise; this guide and the user documentation describe capabilities.
 
 ### Build from source (developers only)
 
