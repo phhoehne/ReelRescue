@@ -324,7 +324,7 @@ struct ContentView: View {
             Spacer()
             Label("Processed on your Mac", systemImage: "desktopcomputer").font(.caption).foregroundStyle(.secondary)
             Button { m.showHelp = true } label: { Label("Help & setup", systemImage: "questionmark.circle") }.buttonStyle(.plain)
-            Text("Version 1.1 · Personal build").font(.caption2).foregroundStyle(.secondary)
+            Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"))").font(.caption2).foregroundStyle(.secondary)
         }.padding(20).background(mist)
     }
 
