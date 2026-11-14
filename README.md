@@ -145,6 +145,27 @@ Use **Product → Archive** for a release archive. Distribution outside your own
 
 Before bundling third-party executables in a future release, review their licenses and redistribution requirements in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
+### Notarize a signed release
+
+Store notarization credentials in Keychain interactively (never in source or chat):
+
+```sh
+xcrun notarytool store-credentials ReelRescue
+```
+
+Configure a Developer ID Application identity in your ignored local signing
+configuration, then package committed source with `python3 scripts/release.py`.
+Submit that ZIP to Apple and verify the stapled result:
+
+```sh
+python3 scripts/notarize.py --profile ReelRescue
+```
+
+The command uploads the app to Apple, waits for acceptance, staples the ticket,
+checks Gatekeeper, and regenerates the final ZIP and its checksum. It preserves
+the submitted ZIP for audit. Only the final versioned ZIP, SHA256SUMS.txt and
+release.json belong in the GitHub release assets. No GitHub publication occurs.
+
 ## Versions and release downloads
 
 The app uses `MAJOR.MINOR.PATCH` versions, starting with **1.1.0**:
