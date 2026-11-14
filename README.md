@@ -4,9 +4,9 @@
 
 Reel Rescue is an open-source macOS app for recovering footage from damaged **Video CDs (VCDs)** and **Super Video CDs (SVCDs)**—including discs that will no longer mount or play normally.
 
-It reads recorded CDs, compares saved raw reads of the same disc, and preserves recovered footage with a report of what remains uncertain. Once the footage is saved, optional tools help clean up the picture and sound or create a smaller copy for sharing.
+It reads recorded CDs, compares saved raw reads of the same disc, and preserves recovered footage with a report of what remains uncertain. Once the footage is saved, optional tools improve picture clarity and sound or create a more compact viewing copy.
 
-**Recover first. Review what survived. Clean up and share when you’re ready.**
+**Recover the footage first, then enhance it if needed.**
 
 ## What it does
 
@@ -20,7 +20,7 @@ It reads recorded CDs, compares saved raw reads of the same disc, and preserves 
 
 Original disc media and source files are opened read-only. Each run saves its output in a new project folder. Processing stays on your Mac, with no accounts or uploads.
 
-## Optional cleanup and sharing
+## Optional footage enhancement
 
 These tools support the recovered footage after the recovery itself:
 
@@ -72,11 +72,16 @@ Only compatible whole, read-only optical media are accepted. If macOS denies raw
 
 An `.iso` extension alone does not identify the sector format. Recovery currently requires raw **2,352-byte CD sectors**.
 
-### Review and optionally improve
+### Enhance recovered footage
 
 When recovery finishes, the app shows saved tracks, verified sectors, and remaining uncertainty. Open the recovery folder to inspect the files, or choose a track and select **Enhance this track**.
 
-A playable copy at the original display size is enabled by default. Expand **After recovery: make a viewing copy** to change its format or disable it. Picture cleanup, timed sound repairs, and 1080p sharing exports are also available under **Enhance footage**.
+A playable copy at the original display size is enabled by default. Expand **Viewing copy** to change its format or disable it. Picture enhancement, timed sound repairs, and 1080p viewing copies are also available under **Enhance footage**.
+
+After recovery, **Enhance footage** automatically loads the latest recovered
+track. A selected recovery track becomes the default; multiple tracks can be
+switched in the enhancement screen. The app keeps navigation and processing
+controls concise; this guide and the user documentation describe capabilities.
 
 See [the user guide](Guide.txt) for repair-range syntax, stopping behavior, and more detail about saved files.
 
@@ -87,7 +92,7 @@ See [the user guide](Guide.txt) for repair-range syntax, stopping behavior, and 
 | Compatible recorded VCD/SVCD in an optical drive | Raw 2,352-byte sectors required |
 | Whole-disc raw CD images | Supported, including raw images named `.iso` |
 | Single-file Mode 2/2352 CUE sheet | Track-boundary fallback |
-| Extracted video files readable by FFmpeg | Optional cleanup and export |
+| Extracted video files readable by FFmpeg | Optional enhancement and export |
 | Ordinary 2,048-byte ISO images | Not supported for disc recovery |
 | DVDs, Blu-rays, and general hard-drive recovery | Not supported |
 | Multi-file CUE layouts | Not supported |
@@ -107,11 +112,6 @@ Config/                Signing configuration and local override example
 tests/                 Recovery and video-processing tests
 Guide.txt              User instructions
 ```
-
-After recovery, **Enhance footage** automatically loads the latest recovered
-track. A selected recovery track becomes the default; multiple tracks can be
-switched in the enhancement screen. The app keeps navigation and processing
-controls concise; this guide and the user documentation describe capabilities.
 
 ### Build from source (developers only)
 

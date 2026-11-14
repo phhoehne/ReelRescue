@@ -19,9 +19,9 @@ files. Choose a track and “Enhance this track” for optional picture,
 sound or sharing improvements.
 
 A playable copy at the original display size is enabled by default. Expand
-“After recovery: make a viewing copy” to turn it off or choose another format.
+“Viewing copy” to turn it off or choose another format.
 Enhancement is OFF by default. Cleanup, audio repairs and 1080p H.265 sharing
-remain available separately under “After recovery → Enhance footage”.
+remain available separately under “Enhance footage”.
 
 RECOVER AN INSERTED CD
 Insert the CD and refresh the drive list. Only whole, read-only optical media
