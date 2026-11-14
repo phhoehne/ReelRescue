@@ -87,7 +87,7 @@ def sha(path):
     return h.hexdigest()
 
 
-def run(cmd, log, phase, duration=None):
+def run(cmd, log, phase, duration=None, read_progress=None):
     """Run only an argument array, never shell text; cancel the entire child group."""
     global ACTIVE
     dump(Path(log).with_suffix(".command.json"), cmd)
@@ -96,17 +96,26 @@ def run(cmd, log, phase, duration=None):
         try:
             ACTIVE = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err,
                                       text=True, start_new_session=True, bufsize=1)
-            for line in ACTIVE.stdout:
-                text = line.strip()
-                if text.startswith("out_time_us="):
+            if read_progress is not None:
+                while ACTIVE.poll() is None:
+                    read_progress()
                     try:
-                        seconds = int(text.split("=", 1)[1]) / 1e6
-                    except ValueError:
-                        continue
-                    if time.monotonic() - last > .4:
-                        progress(phase, min(.999, seconds / duration) if duration else None,
-                                 f"{seconds / 60:.1f} minutes processed")
-                        last = time.monotonic()
+                        ACTIVE.wait(timeout=0.5)
+                    except subprocess.TimeoutExpired:
+                        pass
+                read_progress()
+            else:
+                for line in ACTIVE.stdout:
+                    text = line.strip()
+                    if text.startswith("out_time_us="):
+                        try:
+                            seconds = int(text.split("=", 1)[1]) / 1e6
+                        except ValueError:
+                            continue
+                        if time.monotonic() - last > .4:
+                            progress(phase, min(.999, seconds / duration) if duration else None,
+                                     f"{seconds / 60:.1f} minutes processed")
+                            last = time.monotonic()
             code = ACTIVE.wait()
             if code:
                 tail = Path(log).read_text(errors="replace")[-1800:]
@@ -399,16 +408,77 @@ def discs():
     return disc_inventory()["discs"]
 
 
+def rescued_bytes(mapfile, total):
+    """Accept only a complete, contiguous ddrescue map snapshot."""
+    try:
+        rows = []
+        for line in Path(mapfile).read_text().splitlines():
+            fields = line.split()
+            if len(fields) != 3 or fields[2] not in ("?","*","/","-","+"): continue
+            try:
+                position, size = (int(value,16) if value.lower().startswith("0x") else int(value,10) for value in fields[:2])
+            except ValueError:
+                return None
+            if size <= 0 or position < 0: return None
+            rows.append((position,size,fields[2]))
+        cursor = rescued = 0
+        for position,size,status in rows:
+            if position != cursor or position+size > total: return None
+            cursor += size
+            if status == "+": rescued += size
+        return rescued if cursor == total else None
+    except (OSError,UnicodeError):
+        return None
+
+
+class CDReadProgress:
+    def __init__(self, mapfile, total, clock=time.monotonic):
+        self.mapfile, self.total, self.clock = mapfile,total,clock
+        self.started = self.last_change = clock()
+        self.samples = collections.deque([(self.started,0)])
+        self.rescued = 0
+
+    def __call__(self):
+        now = self.clock()
+        rescued = rescued_bytes(self.mapfile,self.total)
+        if rescued is not None and rescued >= self.rescued:
+            if rescued > self.rescued: self.last_change = now
+            self.rescued = rescued
+            self.samples.append((now,rescued))
+        while len(self.samples)>2 and self.samples[1][0] < now-10:
+            self.samples.popleft()
+        elapsed = now-self.samples[0][0]
+        rate = (self.rescued-self.samples[0][1])/elapsed if elapsed>0 else 0
+        stalled = now-self.last_change >= 5
+        remaining = self.total-self.rescued
+        eta = remaining/rate if elapsed>=1 and rate>0 and not stalled and remaining>0 else None
+        fraction = self.rescued/self.total
+        detail = f"{fraction*100:.1f}% · {self.rescued/1e6:.1f} / {self.total/1e6:.1f} MB"
+        if eta is not None:
+            seconds = max(1,math.ceil(eta))
+            if seconds>=3600: estimate=f"{seconds//3600}h {(seconds%3600)//60}m"
+            elif seconds>=60: estimate=f"{seconds//60}m {seconds%60}s"
+            else: estimate=f"{seconds}s"
+            detail += " · Est. " + estimate + " remaining"
+        elif remaining==0: detail += " · Finishing"
+        elif stalled: detail += " · Waiting for drive"
+        else: detail += " · Estimating time remaining"
+        emit("progress",phase="Reading the CD",fraction=fraction,detail=detail,
+             eta_seconds=eta,bytes_read=self.rescued,total_bytes=self.total)
+
+
 def capture(device, folder, expected=None, diagnostics=None):
     info = disk_info(device)
     if expected and info["identity"] != expected:
         raise RescueError("The selected drive or disc changed. Refresh the list and select it again.")
     image = folder / "disc_read.bin"; mapfile = folder / "disc_read.map"
     # No force, output overwrite, device writes, unmounts or sudo commands.
-    cmd = [tool("ddrescue"),"-q","-n","-b",str(RAW),"-s",str(info["size"]),
+    cmd = [tool("ddrescue"),"-q","-n","--mapfile-interval=1,5","-b",str(RAW),"-s",str(info["size"]),
            info["raw_device"],str(image),str(mapfile)]
-    progress("Reading the CD")
-    run(cmd, (diagnostics or folder) / "capture.log", "Reading the CD")
+    progress("Reading the CD",0,"Estimating time remaining")
+    run(cmd, (diagnostics or folder) / "capture.log", "Reading the CD",
+        read_progress=CDReadProgress(mapfile,info["size"]))
+    progress("Reading the CD",1,"Read pass finished")
     return image, info
 
 

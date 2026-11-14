@@ -40,7 +40,7 @@ sys.path.insert(0, {str(ROOT / 'backend')!r})
 import reel_rescue as r
 signal.signal(signal.SIGTERM, r.cancel)
 try:
-    r.run([sys.executable, '-c', {('import os,time,pathlib; pathlib.Path('+repr(str(child_pid))+').write_text(str(os.getpid())); time.sleep(60)')!r}], {str(p/'child.log')!r}, 'test')
+    r.run([sys.executable, '-c', {('import os,time,pathlib; pathlib.Path('+repr(str(child_pid))+').write_text(str(os.getpid())); time.sleep(60)')!r}], {str(p/'child.log')!r}, 'test', read_progress=lambda:None)
 except r.Cancelled:
     sys.exit(130)
 """

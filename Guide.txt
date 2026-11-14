@@ -17,6 +17,8 @@ recovered tracks joins compatible tracks into Combined.mpg without re-encoding.
 Picture and sound improvements or H.264/H.265 copies are separate actions.
 
 RECOVER AN INSERTED CD
+Reading the CD shows live progress and an estimated time remaining. The
+estimate adapts to drive speed and is withheld during stalls on damaged areas.
 Insert the CD and refresh the drive list. Only whole, read-only optical media
 exposing 2,352-byte sectors are accepted. You may also add older raw reads of
 the same disc. The first read uses GNU ddrescue with the actual sector size

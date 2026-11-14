@@ -62,6 +62,11 @@ Physical capture needs broader testing across drives and damaged media.
 3. Optionally add earlier raw reads of that same physical disc.
 4. Choose where to save the recovery project and click **Start recovery**.
 
+During **Reading the CD**, the app shows a progress bar, percentage, bytes read,
+and estimated time remaining. The estimate adapts to the recent read speed;
+it switches to **Waiting for drive** during stalls on damaged areas. The ETA
+covers the current CD-reading pass, rather than the later recovery steps.
+
 Only compatible whole, read-only optical media are accepted. If macOS denies raw-device access, the app reports the error. You can still work with previously saved raw images.
 
 ### From saved disc reads
