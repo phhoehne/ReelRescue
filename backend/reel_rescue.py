@@ -606,6 +606,28 @@ def project(destination):
     p.mkdir(); return p
 
 
+def support_root():
+    override = os.environ.get("REEL_RESCUE_SUPPORT_ROOT")
+    return Path(override).expanduser().resolve() if override else Path.home() / "Library/Application Support/Reel Rescue/Projects"
+
+
+def publish_video(source, destination):
+    """Publish a verified video across volumes, leaving no failed copy in output."""
+    source, destination = Path(source), Path(destination)
+    if destination.exists(): raise RescueError("A video with this name already exists; it was not overwritten.")
+    partial = destination.with_name("." + destination.stem + ".partial" + destination.suffix)
+    owned = False
+    try:
+        with source.open("rb") as src, partial.open("xb") as out:
+            owned = True
+            shutil.copyfileobj(src, out, length=8 * 1024 * 1024)
+        if sha(partial) != sha(source): raise RescueError("The saved video copy failed its checksum check.")
+        partial.replace(destination)
+    except BaseException:
+        if owned and partial.exists(): partial.unlink()
+        raise
+
+
 def write_summary(folder, report):
     outputs = report.get("outputs", [])
     lines = ["Recovery completed" if report.get("mode") != "video" else "Export completed", ""]
@@ -627,18 +649,29 @@ def job(config):
     if mode not in ("video","images","disc"): raise RescueError("Unknown task.")
     tool("ffmpeg"); tool("ffprobe")
     p = project(config["destination"])
-    diagnostics = p / "Diagnostics"; diagnostics.mkdir()
-    data = p / "Recovery data"
+    work = support_root() / p.name; work.mkdir(parents=True)
+    diagnostics = work / "Diagnostics"; diagnostics.mkdir()
+    data = work / "Recovery data"
+    rendered = work / "Rendered"; rendered.mkdir()
     if mode != "video": data.mkdir()
     dump(diagnostics / "settings.json",config)
-    emit("project",path=str(p))
-    report = dict(status="running",mode=mode,project=str(p),layout_version=2,outputs=[])
+    emit("project",path=str(p),details=str(work))
+    report = dict(status="running",mode=mode,project=str(p),layout_version=3,work_directory=str(work),outputs=[])
     dump(diagnostics / "report.json",report)
+    def export(source, options, prefix="Film", recovering=False, preview=False):
+        record = export_video(source,rendered,options,prefix=prefix,recovering=recovering,preview=preview)
+        staged = Path(record["file"])
+        final = p / staged.name
+        publish_video(staged,final)
+        record["file"] = str(final)
+        dump(rendered / "Diagnostics" / (prefix + "_validation.json"),record)
+        staged.unlink()
+        return record
     try:
         if mode == "video":
             sources = config.get("sources",[])
             if len(sources) != 1: raise RescueError("Choose one video at a time.")
-            report["outputs"] = [export_video(sources[0],p,config,prefix="Film",preview=config.get("preview",False))]
+            report["outputs"] = [export(sources[0],config,prefix="Film",preview=config.get("preview",False))]
         else:
             paths = list(config.get("sources",[])); info = None
             if mode == "disc":
@@ -661,15 +694,20 @@ def job(config):
             dump(diagnostics / "report.json",report)
             if config.get("export",True):
                 for i,item in enumerate(extracted,1):
-                    report["outputs"].append(export_video(item["file"],p,dict(config,audio_ranges="",hold_ranges=""),prefix=f"Track_{i:02d}",recovering=True))
+                    report["outputs"].append(export(item["file"],dict(config,audio_ranges="",hold_ranges=""),prefix=f"Track_{i:02d}",recovering=True))
+            else:
+                for item in extracted:
+                    final = p / Path(item["file"]).name
+                    publish_video(item["file"],final)
+                    report["outputs"].append(dict(file=str(final),source=item["file"],sha256=sha(final),original_stream=True))
             uncertain = len(recovery["unresolved_lbas"])
             emit("recovery",verified=recovery["verified_sectors"],total=recovery["sectors"],uncertain=uncertain)
             if uncertain: emit("warning",message=f"{uncertain:,} sectors remain missing, unverified or conflicting. Some visible or audible damage may remain.")
         report["status"] = "complete"; dump(diagnostics / "report.json",report)
-        write_summary(p, report)
-        (diagnostics / "SHA256SUMS.txt").write_text("".join(x["sha256"] + "  ../" + Path(x["file"]).name + "\n" for x in report["outputs"]))
+        write_summary(work, report)
+        (diagnostics / "SHA256SUMS.txt").write_text("".join(x["sha256"] + "  " + x["file"] + "\n" for x in report["outputs"]))
         result = report["outputs"][0]["file"] if report["outputs"] else report.get("image",str(p))
-        emit("complete",path=result,project=str(p),message="Finished and verified",report=report)
+        emit("complete",path=result,project=str(p),details=str(work),message="Finished and verified",report=report)
     except BaseException as e:
         report["status"] = "cancelled" if isinstance(e,Cancelled) else "failed"
         report["error"] = str(e); dump(diagnostics / "report.json",report)

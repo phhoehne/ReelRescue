@@ -2,7 +2,7 @@
 
 ## 1.1.0 — Unreleased
 
-- Keep playable videos and Results.txt separate from Recovery data and Diagnostics.
+- Save videos only in the output folder; keep recovery data and diagnostics in app-managed storage.
 - Organize older completed projects while preserving and verifying their original files.
 
 - Simplify the sidebar and rename enhancement tools to Enhance footage.

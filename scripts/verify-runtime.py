@@ -19,7 +19,7 @@ def main():
     spec = importlib.util.spec_from_file_location('rescue', ROOT/'backend/reel_rescue.py')
     rescue = importlib.util.module_from_spec(spec); spec.loader.exec_module(rescue)
     with tempfile.TemporaryDirectory(prefix='reel-relocation-') as temp:
-        root = Path(temp); moved = root/'Moved app/Reel Rescue.app'
+        root = Path(temp); env['REEL_RESCUE_SUPPORT_ROOT']=str(root/'app-support'); moved = root/'Moved app/Reel Rescue.app'
         moved.parent.mkdir()
         subprocess.run(['ditto',str(app),str(moved)],check=True)
         runtime = moved/'Contents/Resources/runtime'
@@ -47,8 +47,8 @@ def main():
         assert hd['audio_bitstream_identical']
         for item in (native,hd):
             project=Path(item['file']).parent
-            assert {x.name for x in project.iterdir()}=={'Film.mp4','Results.txt','Diagnostics'}
-            assert (project/'Diagnostics/report.json').exists()
+            assert {x.name for x in project.iterdir()}=={'Film.mp4'}
+            assert all(p.suffix=='.mp4' for p in project.iterdir())
         # Create a raw Mode 2 image using generated MPEG payload, then recover it.
         run(ffmpeg,'-v','error','-f','lavfi','-i','testsrc2=size=480x576:rate=25:duration=1',
             '-target','pal-svcd',root/'fixture.mpg')
@@ -64,8 +64,9 @@ def main():
         recovered=job(dict(mode='images',sources=[str(image)],cue=str(cue),export=False))
         assert recovered['recovery']['unresolved_lbas']==[]
         project=Path(recovered['project'])
-        assert {x.name for x in project.iterdir()}=={'Results.txt','Recovery data','Diagnostics'}
+        assert {x.name for x in project.iterdir()}=={'Track_01.mpg'}
         assert Path(recovered['image']).parent.name=='Recovery data'
+        assert (Path(recovered['work_directory'])/'Diagnostics/report.json').exists()
         assert Path(recovered['extracted'][0]['file']).read_bytes().startswith(data)
         assert rescue.sha(image)==original
         run(runtime/'bin/ddrescue','-q','-n','-b','2352',image,root/'copy.bin',root/'copy.map')

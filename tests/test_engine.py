@@ -57,6 +57,21 @@ except r.Cancelled:
             finally:
                 if process.poll() is None: process.kill(); process.wait()
 
+    def test_video_publication_preserves_existing_files_and_cleans_failed_copy(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d);src=p/"source.mp4";src.write_bytes(b"original video");dest=p/"video.mp4"
+            r.publish_video(src,dest);self.assertEqual(dest.read_bytes(),src.read_bytes())
+            with self.assertRaises(r.RescueError):r.publish_video(src,dest)
+            self.assertEqual(src.read_bytes(),b"original video")
+            dest.unlink()
+            partial=p/".video.partial.mp4";partial.write_bytes(b"existing file")
+            with self.assertRaises(FileExistsError):r.publish_video(src,dest)
+            self.assertEqual(partial.read_bytes(),b"existing file")
+            partial.unlink()
+            with patch.object(r.shutil,"copyfileobj",side_effect=r.Cancelled):
+                with self.assertRaises(r.Cancelled):r.publish_video(src,dest)
+            self.assertFalse(partial.exists());self.assertFalse(dest.exists())
+
     def test_crc_reference_vector_and_corruption(self):
         self.assertEqual(r.edc(b"123456789"), 0x6EC2EDC4)
         for form in (True, False):
@@ -136,6 +151,7 @@ class VideoTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory(); cls.folder = Path(cls.temp.name)
+        cls.support_patch = patch.dict(r.os.environ,{"REEL_RESCUE_SUPPORT_ROOT":str(cls.folder/"app-support")});cls.support_patch.start()
         cls.source = cls.folder/"anamorphic.mp4"
         metadata = cls.folder/"chapters.txt"
         metadata.write_text(";FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=2000\ntitle=First\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=2000\nEND=4000\ntitle=Second\n")
@@ -145,7 +161,7 @@ class VideoTests(unittest.TestCase):
                         "-vf","setsar=8/5","-c:v","libx264","-preset","ultrafast","-c:a","aac",str(cls.source)],check=True)
 
     @classmethod
-    def tearDownClass(cls): cls.temp.cleanup()
+    def tearDownClass(cls): cls.support_patch.stop(); cls.temp.cleanup()
 
     def export(self, name, **options):
         folder = self.folder/name; folder.mkdir()
@@ -155,13 +171,13 @@ class VideoTests(unittest.TestCase):
     def test_job_keeps_playable_video_separate_from_diagnostics(self):
         with contextlib.redirect_stdout(io.StringIO()) as output:
             r.job(dict(mode="video",sources=[str(self.source)],destination=str(self.folder),preset="native",enhance=False,hardware=False))
-        event=json.loads(output.getvalue().splitlines()[-1]);p=Path(event["project"])
-        self.assertEqual({x.name for x in p.iterdir()},{"Film.mp4","Results.txt","Diagnostics"})
-        self.assertTrue((p/"Diagnostics/Film_encode.log").exists())
-        self.assertTrue((p/"Diagnostics/Film_decode.command.json").exists())
-        self.assertTrue((p/"Diagnostics/Film_validation.json").exists())
-        report=json.loads((p/"Diagnostics/report.json").read_text())
-        self.assertEqual(report["layout_version"],2)
+        event=json.loads(output.getvalue().splitlines()[-1]);p=Path(event["project"]);work=Path(event["details"])
+        self.assertEqual({x.name for x in p.iterdir()},{"Film.mp4"})
+        self.assertTrue((work/"Rendered/Diagnostics/Film_encode.log").exists())
+        self.assertTrue((work/"Rendered/Diagnostics/Film_decode.command.json").exists())
+        self.assertTrue((work/"Rendered/Diagnostics/Film_validation.json").exists())
+        report=json.loads((work/"Diagnostics/report.json").read_text())
+        self.assertEqual(report["layout_version"],3)
         self.assertEqual(report["status"],"complete")
         self.assertTrue(report["outputs"][0]["audio_bitstream_identical"])
 
@@ -170,9 +186,10 @@ class VideoTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()) as output:
             with self.assertRaises(r.RescueError):
                 r.job(dict(mode="images",sources=[str(source)],destination=str(self.folder)))
-        p=Path(json.loads(output.getvalue().splitlines()[0])["path"])
-        self.assertEqual(json.loads((p/"Diagnostics/report.json").read_text())["status"],"failed")
-        self.assertTrue((p/"Recovery data").is_dir())
+        event=json.loads(output.getvalue().splitlines()[0]);p=Path(event["path"]);work=Path(event["details"])
+        self.assertEqual(json.loads((work/"Diagnostics/report.json").read_text())["status"],"failed")
+        self.assertTrue((work/"Recovery data").is_dir())
+        self.assertEqual(list(p.iterdir()),[])
         self.assertEqual(source.read_bytes(),b"unreadable source")
 
     def test_native_geometry_chapters_audio_and_frame_count(self):

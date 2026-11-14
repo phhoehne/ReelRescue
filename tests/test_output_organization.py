@@ -34,3 +34,32 @@ class OrganizationTests(unittest.TestCase):
             p=Path(d);(p/'report.json').write_text('{"status":"running"}')
             with self.assertRaises(RuntimeError):organizer.organize(p)
             self.assertEqual({x.name for x in p.iterdir()},{'report.json'})
+
+storage_spec=importlib.util.spec_from_file_location('storage',ROOT/'scripts/store-recovery-details.py')
+storage=importlib.util.module_from_spec(storage_spec);storage_spec.loader.exec_module(storage)
+
+
+class AppStorageTests(unittest.TestCase):
+    def test_completed_output_contains_only_videos_after_storage_move(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);p=root/'Videos';p.mkdir();diag=p/'Diagnostics';diag.mkdir();data=p/'Recovery data';data.mkdir()
+            (p/'Track_01.mp4').write_bytes(b'video');(data/'recovered.bin').write_bytes(b'raw source')
+            original=json.dumps(dict(status='complete',image=str(data/'recovered.bin'),outputs=[dict(file=str(p/'Track_01.mp4'))]))
+            (diag/'report.json').write_text(original);(p/'Results.txt').write_text('results')
+            result=storage.store(p,root/'Support')
+            self.assertEqual({f.name for f in p.iterdir()},{'Track_01.mp4'})
+            work=Path(result['recovery_details'])
+            self.assertEqual((work/'Recovery data/recovered.bin').read_bytes(),b'raw source')
+            self.assertEqual((work/'Diagnostics/Before storage move/Diagnostics/report.json').read_text(),original)
+            current=json.loads((work/'Diagnostics/report.json').read_text())
+            self.assertEqual(current['image'],str(work/'Recovery data/recovered.bin'))
+            self.assertEqual(current['layout_version'],3)
+            self.assertTrue(result['all_original_files_preserved'])
+
+    def test_active_output_is_not_moved(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/'Videos';(p/'Diagnostics').mkdir(parents=True)
+            (p/'Diagnostics/report.json').write_text('{"status":"running"}')
+            with self.assertRaises(RuntimeError):storage.store(p,Path(d)/'Support')
+            self.assertTrue((p/'Diagnostics/report.json').exists())
+            self.assertFalse((Path(d)/'Support').exists())

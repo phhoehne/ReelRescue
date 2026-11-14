@@ -85,39 +85,31 @@ controls concise; this guide and the user documentation describe capabilities.
 
 See [the user guide](Guide.txt) for repair-range syntax, stopping behavior, and more detail about saved files.
 
-## Saved project files
+## Saved videos and recovery storage
 
-Each run creates a new project folder. Playable videos stay at the top level:
+**The output folder contains videos only.** No logs, reports, raw images, hidden
+sidecars, or summary files are saved there. MP4 copies are checked before they
+are published. If MP4 copies are disabled, the output contains original MPEG
+videos instead. Failed or cancelled video copies are removed from the output.
 
 ```text
 Reel Rescue <date>/
   Track_01.mp4
   Track_02.mp4
-  Results.txt
-  Recovery data/
-    Original video/
-    disc_read.bin
-    disc_read.map
-    recovered.bin
-    recovered_after_retry.bin
-    retry_reads.bin
-  Diagnostics/
-    report.json
-    settings.json
-    SHA256SUMS.txt
-    ...logs and validation records
+  Track_03.mp4
 ```
 
-`Results.txt` summarizes the actual outcome. **Recovery data** retains raw reads,
-recovered images and original MPEG footage for future recovery attempts; multiple
-disc images can use substantial space. **Diagnostics** contains technical records
-for troubleshooting. Failed or cancelled work is retained in the same folders.
-An enhancement-only export has no Recovery data folder.
+Raw disc reads, recovered images, original MPEG streams, processing logs and
+verification reports are retained separately in the current user's app storage:
 
-Existing completed projects made by older builds can be organized with
-`python3 scripts/organize-project.py "/path/to/project"`. This preserves every
-original file, updates internal path references, saves original metadata records,
-and verifies file contents. It refuses active or already organized projects.
+```text
+~/Library/Application Support/Reel Rescue/Projects/
+```
+
+Open **Task details → Recovery details** for the current run, or use **Help &
+setup → Recovery details** to access retained data. This storage can occupy
+several gigabytes per recovery. It is preserved for further recovery attempts
+and troubleshooting, including failed and cancelled jobs.
 
 ## Supported formats and limits
 

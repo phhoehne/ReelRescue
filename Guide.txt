@@ -77,10 +77,13 @@ Stop terminates processing and keeps partial work plus recovery maps.
 Completed video files are published only after decoding and basic timing,
 dimension, frame-count and audio checks. Passing these checks means the file
 is playable; it does not mean all visible or audible source defects are gone.
-Playable MP4 files and Results.txt are at the top level. Recovery data contains
-raw reads, recovered images and Original video MPEGs. Diagnostics contains
-report.json, settings.json, exact commands, logs, validation records and SHA256
-checksums. Partial work remains in these folders after failure or cancellation.
+The output folder contains videos only: verified MP4 copies, or original MPEG
+videos when MP4 copies are disabled. Raw disc reads, images, original streams,
+logs, reports and checksums are stored separately in the current user's
+Library/Application Support/Reel Rescue/Projects folder. Recovery details in
+Task details opens the current run's stored data; Help & setup also provides
+access. Partial work is retained there after failure or cancellation. Failed
+video copies are removed from the output folder.
 Keep originals and raw recoveries even after producing a good viewing copy.
 
 REQUIREMENTS

@@ -43,6 +43,7 @@ final class Model: ObservableObject {
     @Published var error = ""
     @Published var log = ""
     @Published var project: URL?
+    @Published var recoveryDetails: URL?
     @Published var result: URL?
     @Published var recoveredVideos: [URL] = []
     @Published var selectedRecoveredVideo = ""
@@ -203,7 +204,7 @@ final class Model: ObservableObject {
     func start(preview: Bool = false) {
         guard canRun, let py = python else { return }
         player?.pause(); busy = true; phase = "Preparing"; detail = ""
-        error = ""; warning = ""; log = ""; fraction = nil; project = nil; result = nil
+        error = ""; warning = ""; log = ""; fraction = nil; project = nil; recoveryDetails = nil; result = nil
         recoveryVerified = nil; recoveryUncertain = 0; recoveredVideos = []; selectedRecoveredVideo = ""
         var settings: [String: Any] = ["mode": jobMode, "sources": sources.map(\.path), "destination": destination.path,
                                       "preset": preset, "enhance": enhance, "retry": retry, "export": makeVideos,
@@ -240,7 +241,7 @@ final class Model: ObservableObject {
             DispatchQueue.main.async {
                 self.busy = false; self.process = nil
                 if self.result == nil && self.error.isEmpty && self.phase != "Stopped" {
-                    self.error = "The task ended before a verified result was produced. Open the project folder to inspect the logs."
+                    self.error = "The task ended before a verified result was produced. Open Recovery details to inspect the logs."
                     self.phase = "Needs attention"
                 }
             }
@@ -253,7 +254,9 @@ final class Model: ObservableObject {
         }
         if let message = e["message"] as? String { log += message + "\n" }
         switch type {
-        case "project": project = (e["path"] as? String).map { URL(fileURLWithPath: $0) }
+        case "project":
+            project = (e["path"] as? String).map { URL(fileURLWithPath: $0) }
+            recoveryDetails = (e["details"] as? String).map { URL(fileURLWithPath: $0) }
         case "progress":
             phase = e["phase"] as? String ?? phase; detail = e["detail"] as? String ?? ""; fraction = e["fraction"] as? Double
         case "warning": warning = e["message"] as? String ?? ""
@@ -282,6 +285,10 @@ final class Model: ObservableObject {
 
     func stop() { if process?.isRunning == true { phase = "Stopping safely"; process?.terminate() } }
     func revealProject() { if let project { NSWorkspace.shared.open(project) } }
+    func revealRecoveryDetails() {
+        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Reel Rescue/Projects")
+        NSWorkspace.shared.open(recoveryDetails ?? root)
+    }
     func playResult() { if let result { NSWorkspace.shared.open(result) } }
 }
 
@@ -336,7 +343,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Task details").font(.title2.bold())
                 ScrollView { Text(m.log.isEmpty ? "No messages yet." : m.log).textSelection(.enabled).font(.system(.body, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading) }
-                HStack { if m.project != nil { Button("Open project folder", action: m.revealProject) }; Spacer(); Button("Done") { m.showLog = false }.keyboardShortcut(.defaultAction) }
+                HStack { if m.recoveryDetails != nil { Button("Recovery details", action: m.revealRecoveryDetails) }; Spacer(); Button("Done") { m.showLog = false }.keyboardShortcut(.defaultAction) }
             }.padding(24).frame(width: 700, height: 480)
         }
     }
@@ -484,7 +491,7 @@ struct ContentView: View {
                 if m.usesDrive { Toggle("Retry uncertain sectors twice", isOn: $m.retry) }
                 DisclosureGroup("Viewing copy", isExpanded: $copiesExpanded) {
                     VStack(alignment: .leading, spacing: 14) {
-                        Toggle("Also create playable videos", isOn: $m.makeVideos)
+                        Toggle("Create MP4 viewing copies", isOn: $m.makeVideos)
                         exportOptions.disabled(!m.makeVideos)
                     }.padding(.top, 12)
                 }
@@ -529,7 +536,7 @@ struct ContentView: View {
     var destination: some View {
         VStack(alignment: .leading, spacing: 9) {
             Divider()
-            HStack { Text(m.workflow == .video ? "Save viewing copies in" : "Save recovery projects in").font(.headline); Spacer(); Button("Choose folder…", action: m.chooseDestination) }
+            HStack { Text("Save videos in").font(.headline); Spacer(); Button("Choose folder…", action: m.chooseDestination) }
             Label(m.destination.path, systemImage: "folder").font(.callout).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
         }
     }
@@ -559,7 +566,7 @@ struct ContentView: View {
                         Button("Open folder", action: m.revealProject)
                         Button("Play copy", action: m.playResult).buttonStyle(.borderedProminent).controlSize(.large)
                     } else {
-                        Button("Open recovery folder", action: m.revealProject).buttonStyle(.borderedProminent).controlSize(.large)
+                        Button("Open videos", action: m.revealProject).buttonStyle(.borderedProminent).controlSize(.large)
                     }
                     Button(m.workflow == .video ? "New copy" : "New recovery") { m.result = nil; m.recoveryVerified = nil; m.recoveredVideos = []; m.phase = "Ready"; m.detail = "" }
                 } else {
@@ -587,6 +594,7 @@ struct ContentView: View {
             ForEach(["ffmpeg", "ffprobe", "ddrescue"], id: \.self) { name in
                 HStack { Image(systemName: m.tools[name] != nil ? "checkmark.circle.fill" : "exclamationmark.circle").foregroundStyle(m.tools[name] != nil ? accent : .orange); Text(name); Spacer(); Text(m.tools[name] ?? "Unavailable").font(.caption).foregroundStyle(.secondary) }
             }
+            Button("Recovery details", action: m.revealRecoveryDetails)
             Button("Open third-party licenses") {
                 if let url = Bundle.main.resourceURL?.appendingPathComponent("runtime/licenses") { NSWorkspace.shared.open(url) }
             }
