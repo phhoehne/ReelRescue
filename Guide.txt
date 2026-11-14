@@ -7,27 +7,20 @@ If you already have raw reads, select “Local files” on the recovery screen. 
 sources and a folder, then click Start recovery. Every run creates a new
 project and opens originals read-only. Everything runs locally.
 
-RECOVER FIRST, THEN REVIEW
-Reel Rescue preserves the recovered disc image and original MPEG footage.
-It compares checksummed sectors across reads of the same disc, saves intact
-data and reports what remains uncertain. It cannot guarantee a perfect
-recovery or reconstruct footage that is completely missing.
+RECOVER FIRST, THEN ENHANCE
+Recovery saves one original .mpg video per track. SVCDs retain MPEG-2 video;
+VCDs retain MPEG-1. Extraction does not convert the footage to MP4.
+There are no export-format or joining options in the recovery step.
 
-When recovery finishes, “What we recovered” shows saved tracks, verified
-sectors and remaining uncertainty. Open the recovery folder to inspect all
-files. Choose a track and “Enhance this track” for optional picture,
-sound or sharing improvements.
-
-A playable copy at the original display size is enabled by default. Expand
-“Viewing copy” to turn it off or choose another format.
-Enhancement is OFF by default. Cleanup, audio repairs and 1080p H.265 sharing
-remain available separately under “Enhance footage”.
+Enhance footage automatically loads the latest recovered track. Combine
+recovered tracks joins compatible tracks into Combined.mpg without re-encoding.
+Picture and sound improvements or H.264/H.265 copies are separate actions.
 
 RECOVER AN INSERTED CD
 Insert the CD and refresh the drive list. Only whole, read-only optical media
 exposing 2,352-byte sectors are accepted. You may also add older raw reads of
 the same disc. The first read uses GNU ddrescue with the actual sector size
-and saves its recovery map. Optional retries read uncertain sectors twice,
+and saves its temporary map. The app retries uncertain sectors twice,
 up to 2,000 sectors. The app never formats, writes to, or unmounts the disc.
 If macOS denies raw-device access, the task reports that error; it does not
 ask for administrator credentials or change device permissions. You can
@@ -49,16 +42,15 @@ disc is read, so unavailable trailing sectors cannot always be identified.
 
 Tracks are discovered from the VCD/SVCD disc directory. If that directory is
 damaged, add the original single-file Mode 2/2352 CUE sheet. Do not invent
-track boundaries. Original MPEG payloads, a recovered raw image, reports and
-optional playable exports are kept together. Separate tracks remain separate
-videos in this version. To inspect or enhance one further, open its MPEG or
+track boundaries. Only the recovered MPEG videos are saved. Raw reads, maps and logs are
+temporary working files and are removed when the run ends. To inspect or enhance one further, open its MPEG or
 viewing copy in Enhance footage.
 
-OPTIONAL CLEANUP AND SHARING
+POST-PROCESSING
 • Drop a video in the window, or use Choose video / Command-O.
 • Original display size: H.264 with correct square-pixel geometry.
 • 1080p high quality: H.264, Apple hardware quality 85.
-• 1080p sharing: H.265/HEVC, Apple hardware quality 65 and hvc1 compatibility.
+• 1080p compact copy: H.265/HEVC, Apple hardware quality 65 and hvc1 compatibility.
 • 1080p fits the full image inside 1920×1080 without stretching or cropping.
 • Interlaced sources identified by their metadata are deinterlaced to fields.
 • Gentle enhancement applies light noise reduction and restrained sharpening.
@@ -73,18 +65,15 @@ OPTIONAL CLEANUP AND SHARING
 • Play copy plays the output. New copy returns to the controls.
 
 PROGRESS, STOPPING AND CHECKS
-Stop terminates processing and keeps partial work plus recovery maps.
+Stop terminates processing and removes temporary work. Already saved videos remain.
 Completed video files are published only after decoding and basic timing,
 dimension, frame-count and audio checks. Passing these checks means the file
 is playable; it does not mean all visible or audible source defects are gone.
-The output folder contains videos only: verified MP4 copies, or original MPEG
-videos when MP4 copies are disabled. Raw disc reads, images, original streams,
-logs, reports and checksums are stored separately in the current user's
-Library/Application Support/Reel Rescue/Projects folder. Recovery details in
-Task details opens the current run's stored data; Help & setup also provides
-access. Partial work is retained there after failure or cancellation. Failed
-video copies are removed from the output folder.
-Keep originals and raw recoveries even after producing a good viewing copy.
+Recovery saves only the original MPEG video tracks in the output folder.
+No raw disc images, maps, diagnostics, reports or extra result folders are kept.
+Temporary working files are removed after completion, failure or cancellation.
+Only the original input files and completed videos remain. A forced process
+termination may leave temporary files for the operating system to clean up.
 
 REQUIREMENTS
 Apple Silicon Mac, macOS 14 or later. Python, FFmpeg, ffprobe and GNU ddrescue

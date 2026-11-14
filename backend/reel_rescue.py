@@ -22,6 +22,7 @@ import signal
 import subprocess
 import sys
 import time
+import tempfile
 import uuid
 
 HERE = Path(__file__).resolve().parent
@@ -573,11 +574,11 @@ def export_video(source, folder, options, prefix="Film", recovering=False, previ
     if not preview:
         drift = abs(float(out["format"]["duration"]) - duration)
         if drift > (max(2,duration*.002) if recovering else .15):
-            raise RescueError("The export's duration changed unexpectedly. The partial file and logs were kept for inspection.")
+            raise RescueError("The export's duration changed unexpectedly.")
         if not interlaced and not recovering:
             source_frames = decoded_frames(source)
             if source_frames is not None and int(ov.get("nb_frames",0)) != source_frames:
-                raise RescueError("The export changed the decoded frame count unexpectedly. Review the saved logs.")
+                raise RescueError("The export changed the decoded frame count unexpectedly.")
         if len(out.get("chapters",[])) != len(meta.get("chapters",[])):
             raise RescueError("The chapter count changed unexpectedly.")
     if preset in ("hd","share") and (ov["width"],ov["height"]) != (1920,1080): raise RescueError("Unexpected output size.")
@@ -588,7 +589,7 @@ def export_video(source, folder, options, prefix="Film", recovering=False, previ
     run([tool("ffmpeg"),"-nostdin","-hide_banner","-v","error","-threads","4","-i",str(partial),"-map","0:v:0","-map","0:a:0?","-progress","pipe:1","-f","null","-"],
         diagnostics / (prefix + "_decode.log"), "Validating playback", float(out["format"]["duration"]))
     if (diagnostics / (prefix + "_decode.log")).read_text().strip():
-        raise RescueError("The exported video reported decoding errors. The partial file and logs were kept.")
+        raise RescueError("The exported video reported decoding errors.")
     partial.rename(final)
     record = dict(file=str(final),source=str(source),preset=preset,preview=preview,
                   duration=out["format"]["duration"],width=ov["width"],height=ov["height"],
@@ -604,11 +605,6 @@ def project(destination):
     if not root.is_dir(): raise RescueError("Choose an existing output folder.")
     p = root / ("Reel Rescue " + dt.datetime.now().strftime("%Y-%m-%d %H%M%S") + "-" + uuid.uuid4().hex[:6])
     p.mkdir(); return p
-
-
-def support_root():
-    override = os.environ.get("REEL_RESCUE_SUPPORT_ROOT")
-    return Path(override).expanduser().resolve() if override else Path.home() / "Library/Application Support/Reel Rescue/Projects"
 
 
 def publish_video(source, destination):
@@ -628,35 +624,62 @@ def publish_video(source, destination):
         raise
 
 
-def write_summary(folder, report):
-    outputs = report.get("outputs", [])
-    lines = ["Recovery completed" if report.get("mode") != "video" else "Export completed", ""]
-    if report.get("mode") != "video":
-        recovery = report.get("recovery", {})
-        lines += [f"Video tracks saved: {len(report.get('extracted', []))}",
-                  f"Verified sectors: {recovery.get('verified_sectors', 0):,}",
-                  f"Uncertain sectors: {len(recovery.get('unresolved_lbas', [])):,}", ""]
-    if outputs:
-        lines += ["Playable videos:"] + [Path(item["file"]).name for item in outputs] + [""]
-    if report.get("mode") != "video":
-        lines += ["Recovery data/: raw disc reads, recovered images and original MPEG footage."]
-    lines += ["Diagnostics/: logs, checksums and verification reports."]
-    (Path(folder) / "Results.txt").write_text("\n".join(lines) + "\n")
+def combine_tracks(sources, folder):
+    if len(sources) < 2: raise RescueError("Choose at least two recovered tracks to combine.")
+    paths = [Path(source).resolve() for source in sources]
+    metadata = [probe(path) for path in paths]
+    def signature(meta):
+        video = next((v for v in meta["streams"] if v["codec_type"] == "video"), None)
+        audio = [a for a in meta["streams"] if a["codec_type"] == "audio"]
+        if not video or video["codec_name"] not in ("mpeg1video", "mpeg2video"):
+            raise RescueError("Combine tracks accepts recovered MPEG-1/MPEG-2 videos.")
+        if any(stream["codec_type"] not in ("audio","video") for stream in meta["streams"]):
+            raise RescueError("These tracks contain additional streams that cannot be safely combined. The original tracks remain separate.")
+        return ((video["codec_name"],video["width"],video["height"],video.get("sample_aspect_ratio")),
+                tuple((a["codec_name"],a.get("sample_rate"),a.get("channels")) for a in audio))
+    signatures = [signature(meta) for meta in metadata]
+    if any(value != signatures[0] for value in signatures[1:]):
+        raise RescueError("These tracks use different picture or sound formats and cannot be joined without conversion.")
+    durations = [float(meta["format"]["duration"]) for meta in metadata]
+    listing = folder / "tracks.ffconcat"
+    lines = ["ffconcat version 1.0"]
+    for path, duration in zip(paths,durations):
+        if "\n" in str(path) or "\r" in str(path): raise RescueError("Track filenames cannot contain newlines.")
+        quoted = str(path).replace("'", "'\\''")
+        lines += ["file '" + quoted + "'", "duration " + str(duration)]
+    listing.write_text("\n".join(lines) + "\n")
+    final = folder / "Combined.mpg"
+    run([tool("ffmpeg"),"-nostdin","-hide_banner","-v","warning","-n","-f","concat","-safe","0", "-i",str(listing),
+         "-map","0:v:0","-map","0:a?","-c","copy","-f","mpeg","-progress","pipe:1",str(final)],
+        folder / "combine.log", "Combining tracks", sum(durations))
+    result = probe(final)
+    if signature(result) != signatures[0]: raise RescueError("The combined video's format changed unexpectedly.")
+    if abs(float(result["format"]["duration"]) - sum(durations)) > max(0.5, sum(durations)*0.002):
+        raise RescueError("The combined video's timing changed unexpectedly.")
+    counts = [decoded_frames(path) for path in paths]
+    if all(count is not None for count in counts) and decoded_frames(final) != sum(counts):
+        raise RescueError("The combined video's frame count changed unexpectedly.")
+    return dict(file=str(final),sha256=sha(final),stream_copy=True,combined_tracks=len(paths))
 
 
 def job(config):
+    # Raw reads, maps and processing records exist only during this run.
+    with tempfile.TemporaryDirectory(prefix="ReelRescue-") as temporary:
+        return run_job(config, Path(temporary))
+
+
+def run_job(config, work):
     mode = config.get("mode")
-    if mode not in ("video","images","disc"): raise RescueError("Unknown task.")
+    if mode not in ("video","images","disc","combine"): raise RescueError("Unknown task.")
     tool("ffmpeg"); tool("ffprobe")
     p = project(config["destination"])
-    work = support_root() / p.name; work.mkdir(parents=True)
     diagnostics = work / "Diagnostics"; diagnostics.mkdir()
     data = work / "Recovery data"
     rendered = work / "Rendered"; rendered.mkdir()
-    if mode != "video": data.mkdir()
+    if mode in ("images","disc"): data.mkdir()
     dump(diagnostics / "settings.json",config)
-    emit("project",path=str(p),details=str(work))
-    report = dict(status="running",mode=mode,project=str(p),layout_version=3,work_directory=str(work),outputs=[])
+    emit("project",path=str(p))
+    report = dict(status="running",mode=mode,project=str(p),layout_version=4,outputs=[])
     dump(diagnostics / "report.json",report)
     def export(source, options, prefix="Film", recovering=False, preview=False):
         record = export_video(source,rendered,options,prefix=prefix,recovering=recovering,preview=preview)
@@ -672,6 +695,12 @@ def job(config):
             sources = config.get("sources",[])
             if len(sources) != 1: raise RescueError("Choose one video at a time.")
             report["outputs"] = [export(sources[0],config,prefix="Film",preview=config.get("preview",False))]
+        elif mode == "combine":
+            record = combine_tracks(config.get("sources",[]),rendered)
+            final = p / "Combined.mpg"
+            publish_video(record["file"],final)
+            record["file"] = str(final)
+            report["outputs"] = [record]
         else:
             paths = list(config.get("sources",[])); info = None
             if mode == "disc":
@@ -684,7 +713,6 @@ def job(config):
                     best = data / "recovered_after_retry.bin"
                     recovery = merge_images(paths + [patch],best,info["size"]//RAW,diagnostics / "recovered_after_retry.json")
             report["recovery"] = recovery
-            report["image"] = str(best)
             try: tracks = iso_tracks(best)
             except RescueError:
                 if config.get("cue"): tracks = cue_tracks(config["cue"],recovery["sectors"])
@@ -692,22 +720,23 @@ def job(config):
             extracted = extract_tracks(best,tracks,data / "Original video")
             report["extracted"] = extracted
             dump(diagnostics / "report.json",report)
-            if config.get("export",True):
-                for i,item in enumerate(extracted,1):
-                    report["outputs"].append(export(item["file"],dict(config,audio_ranges="",hold_ranges=""),prefix=f"Track_{i:02d}",recovering=True))
-            else:
-                for item in extracted:
-                    final = p / Path(item["file"]).name
-                    publish_video(item["file"],final)
-                    report["outputs"].append(dict(file=str(final),source=item["file"],sha256=sha(final),original_stream=True))
+            # Recovery publishes the authored MPEG stream unchanged. Enhancement
+            # and joining are separate post-processing operations.
+            saved = []
+            for item in extracted:
+                final = p / Path(item["file"]).name
+                publish_video(item["file"],final)
+                output = dict(file=str(final),sha256=sha(final),original_stream=True)
+                report["outputs"].append(output)
+                saved.append(dict(item,file=str(final)))
+            report["extracted"] = saved
             uncertain = len(recovery["unresolved_lbas"])
             emit("recovery",verified=recovery["verified_sectors"],total=recovery["sectors"],uncertain=uncertain)
             if uncertain: emit("warning",message=f"{uncertain:,} sectors remain missing, unverified or conflicting. Some visible or audible damage may remain.")
         report["status"] = "complete"; dump(diagnostics / "report.json",report)
-        write_summary(work, report)
         (diagnostics / "SHA256SUMS.txt").write_text("".join(x["sha256"] + "  " + x["file"] + "\n" for x in report["outputs"]))
         result = report["outputs"][0]["file"] if report["outputs"] else report.get("image",str(p))
-        emit("complete",path=result,project=str(p),details=str(work),message="Finished and verified",report=report)
+        emit("complete",path=result,project=str(p),message="Finished and verified",report=report)
     except BaseException as e:
         report["status"] = "cancelled" if isinstance(e,Cancelled) else "failed"
         report["error"] = str(e); dump(diagnostics / "report.json",report)
@@ -725,7 +754,7 @@ def main():
         elif not args.path: raise RescueError("A job settings file is required.")
         else: job(json.loads(Path(args.path).read_text()))
     except Cancelled:
-        emit("cancelled",message="Stopped. Source files are untouched; partial work and recovery maps were kept."); return 130
+        emit("cancelled",message="Stopped. Temporary working files were removed."); return 130
     except Exception as e:
         emit("error",message=str(e)); return 1
     return 0

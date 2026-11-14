@@ -19,7 +19,7 @@ def main():
     spec = importlib.util.spec_from_file_location('rescue', ROOT/'backend/reel_rescue.py')
     rescue = importlib.util.module_from_spec(spec); spec.loader.exec_module(rescue)
     with tempfile.TemporaryDirectory(prefix='reel-relocation-') as temp:
-        root = Path(temp); env['REEL_RESCUE_SUPPORT_ROOT']=str(root/'app-support'); moved = root/'Moved app/Reel Rescue.app'
+        root = Path(temp); moved = root/'Moved app/Reel Rescue.app'
         moved.parent.mkdir()
         subprocess.run(['ditto',str(app),str(moved)],check=True)
         runtime = moved/'Contents/Resources/runtime'
@@ -61,14 +61,18 @@ def main():
                 s[2348:]=rescue.edc(bytes(s[16:2348])).to_bytes(4,'little');out.write(s)
         cue=root/'fixture.cue';cue.write_text('FILE "fixture.bin" BINARY\nTRACK 01 MODE2/2352\nINDEX 01 00:00:00\n')
         original=rescue.sha(image)
-        recovered=job(dict(mode='images',sources=[str(image)],cue=str(cue),export=False))
+        recovered=job(dict(mode='images',sources=[str(image)],cue=str(cue),export=True))
         assert recovered['recovery']['unresolved_lbas']==[]
         project=Path(recovered['project'])
         assert {x.name for x in project.iterdir()}=={'Track_01.mpg'}
-        assert Path(recovered['image']).parent.name=='Recovery data'
-        assert (Path(recovered['work_directory'])/'Diagnostics/report.json').exists()
+        assert all(path.suffix=='.mpg' for path in project.iterdir())
         assert Path(recovered['extracted'][0]['file']).read_bytes().startswith(data)
         assert rescue.sha(image)==original
+        # A second recovered track can be joined in post-processing without conversion.
+        other=root/'second.mpg';shutil.copyfile(project/'Track_01.mpg',other)
+        combined=job(dict(mode='combine',sources=[str(project/'Track_01.mpg'),str(other)]))
+        assert {p.name for p in Path(combined['project']).iterdir()}=={'Combined.mpg'}
+        assert combined['outputs'][0]['stream_copy']
         run(runtime/'bin/ddrescue','-q','-n','-b','2352',image,root/'copy.bin',root/'copy.map')
         assert (root/'copy.bin').read_bytes()==image.read_bytes()
         devices=json.loads(run(engine,'devices').stdout)
@@ -79,7 +83,7 @@ def main():
         run('codesign','--verify','--deep','--strict',moved)
         print(json.dumps(dict(relocated_bundle=True,external_tool_paths_removed=True,
             invalid_python_environment_ignored=True,native_repair_export='passed',hevc_1080p_export='passed',
-            aac_audio_preserved=True,raw_image_recovery='passed',bundled_ddrescue='passed',
+            aac_audio_preserved=True,raw_image_recovery='original MPEG only',combine_without_reencoding='passed',bundled_ddrescue='passed',
             missing_tool_no_host_fallback=True,code_signature='verified',detected_cd_count=len(devices['discs'])),indent=2))
 
 

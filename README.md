@@ -4,26 +4,27 @@
 
 Reel Rescue is an open-source macOS app for recovering footage from damaged **Video CDs (VCDs)** and **Super Video CDs (SVCDs)**—including discs that will no longer mount or play normally.
 
-It reads recorded CDs, compares saved raw reads of the same disc, and preserves recovered footage with a report of what remains uncertain. Once the footage is saved, optional tools improve picture clarity and sound or create a more compact viewing copy.
+It reads recorded CDs, compares saved raw reads of the same disc, and saves the recovered MPEG video tracks. Once the footage is saved, optional tools improve picture clarity and sound or create a more compact viewing copy.
 
 **Recover the footage first, then enhance it if needed.**
 
 ## What it does
 
-- **Recover from a physical CD** using GNU ddrescue with the disc’s actual raw sector size and a saved recovery map.
+- **Recover from a physical CD** using GNU ddrescue with the disc’s actual raw sector size and a temporary working map.
 - **Combine multiple disc reads** by recorded sector address and EDC checksum, retaining intact data found across different attempts.
 - **Retry uncertain sectors** with two bounded read passes when recovering from an inserted CD.
 - **Find VCD/SVCD video tracks** from the disc directory, with a single-file CUE sheet as a fallback when the directory is damaged.
-- **Preserve recovery evidence:** the recovered disc image, original MPEG streams, reports, settings, and processing logs.
-- **Report remaining damage:** missing, unverified, and conflicting sectors are identified rather than counted as successfully verified.
-- **Create playable copies** and check their decoding, timing, and relevant audio and video properties before marking them finished.
+- **Preserve the authored video:** recover the original MPEG program streams without converting the picture or sound.
+- **Report remaining damage:** the app flags uncertain recovery data while processing.
+- **Keep recovery separate from enhancement:** recovery outputs one original `.mpg` file per video track.
 
-Original disc media and source files are opened read-only. Each run saves its output in a new project folder. Processing stays on your Mac, with no accounts or uploads.
+Original disc media and source files are opened read-only. Each run saves its videos in a new output folder. Processing stays on your Mac, with no accounts or uploads.
 
 ## Optional footage enhancement
 
-These tools support the recovered footage after the recovery itself:
+These tools are available in **Enhance footage** after recovery:
 
+- Combine compatible recovered tracks into one MPEG video without re-encoding.
 - Gentle noise reduction and restrained sharpening.
 - Deinterlacing for sources marked as interlaced.
 - Audio click reduction in manually selected time ranges.
@@ -74,42 +75,37 @@ An `.iso` extension alone does not identify the sector format. Recovery currentl
 
 ### Enhance recovered footage
 
-When recovery finishes, the app shows saved tracks, verified sectors, and remaining uncertainty. Open the recovery folder to inspect the files, or choose a track and select **Enhance this track**.
+Recovery finishes with one `.mpg` video per authored track. There are no format,
+enhancement, or joining options in the extraction step. SVCD footage retains
+MPEG-2; VCD footage retains MPEG-1. Damage that could not be recovered may remain.
 
-A playable copy at the original display size is enabled by default. Expand **Viewing copy** to change its format or disable it. Picture enhancement, timed sound repairs, and 1080p viewing copies are also available under **Enhance footage**.
+Open **Enhance footage** to work on the latest recovered track. When there are
+multiple tracks, **Combine recovered tracks** joins them in disc order into
+`Combined.mpg` without re-encoding. Tracks must have matching picture and sound
+formats; incompatible tracks are left separate. Picture/sound improvements and
+H.264/H.265 viewing copies are separate post-processing actions.
 
-After recovery, **Enhance footage** automatically loads the latest recovered
-track. A selected recovery track becomes the default; multiple tracks can be
-switched in the enhancement screen. The app keeps navigation and processing
-controls concise; this guide and the user documentation describe capabilities.
+## Saved files
 
-See [the user guide](Guide.txt) for repair-range syntax, stopping behavior, and more detail about saved files.
-
-## Saved videos and recovery storage
-
-**The output folder contains videos only.** No logs, reports, raw images, hidden
-sidecars, or summary files are saved there. MP4 copies are checked before they
-are published. If MP4 copies are disabled, the output contains original MPEG
-videos instead. Failed or cancelled video copies are removed from the output.
+**The only extraction results are the recovered videos:**
 
 ```text
 Reel Rescue <date>/
-  Track_01.mp4
-  Track_02.mp4
-  Track_03.mp4
+  Track_01.mpg
+  Track_02.mpg
+  Track_03.mpg
 ```
 
-Raw disc reads, recovered images, original MPEG streams, processing logs and
-verification reports are retained separately in the current user's app storage:
+The app does not retain raw images, maps, logs, reports, checksums, or summary
+files as user results or in app-managed recovery storage. Working data is held
+in a temporary directory and removed when the run completes, fails, or is
+cancelled. Video tracks already saved successfully remain available. Abrupt
+process termination may leave operating-system temporary files for normal OS
+cleanup. Original source images and the physical disc are never deleted.
 
-```text
-~/Library/Application Support/Reel Rescue/Projects/
-```
-
-Open **Task details → Recovery details** for the current run, or use **Help &
-setup → Recovery details** to access retained data. This storage can occupy
-several gigabytes per recovery. It is preserved for further recovery attempts
-and troubleshooting, including failed and cancelled jobs.
+MPEG video is preserved exactly as extracted. Some players handle MP4 more
+conveniently; make a separate viewing copy in Enhance footage when needed.
+See [the user guide](Guide.txt) for post-processing options and limitations.
 
 ## Supported formats and limits
 
@@ -245,7 +241,7 @@ should be rebuilt from committed source before publication.
 
 ## Contributing
 
-Bug reports, reproducible recovery cases, and focused pull requests are welcome. Useful reports include the macOS version, optical drive model when relevant, input sector format, and the error or processing log. Remove private paths and personal information before sharing logs; avoid posting personal footage or full disc images publicly.
+Bug reports, reproducible recovery cases, and focused pull requests are welcome. Useful reports include the macOS version, optical drive model when relevant, input sector format, and the error shown in Task details. Remove private paths and personal information before sharing errors; avoid posting personal footage or full disc images publicly.
 
 For recovery-engine changes, include a synthetic fixture or test where practical. Contributions are made under the project’s MIT license.
 

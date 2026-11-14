@@ -2,26 +2,14 @@
 
 ## 1.1.0 — Unreleased
 
-- Save videos only in the output folder; keep recovery data and diagnostics in app-managed storage.
-- Organize older completed projects while preserving and verifying their original files.
+- Recover original MPEG tracks as the only extraction result, preserving MPEG-2 on SVCDs and MPEG-1 on VCDs.
+- Discard temporary working files at the end of each run; remove persistent recovery-data and diagnostic storage.
+- Keep enhancement and lossless track joining in post-processing.
+- Use one recovery screen for an inserted CD or saved raw disc reads.
+- Detect optical media reported with current macOS WholeDisk metadata.
+- Automatically load recovered footage in the enhancement screen.
+- Bundle the Python runtime, FFmpeg/ffprobe, codecs and ddrescue; no Homebrew setup is required.
+- Include third-party licenses, matching dependency sources and Developer ID signing support.
 
-- Simplify the sidebar and rename enhancement tools to Enhance footage.
-- Automatically load the latest recovered track when opening enhancement.
-
-- Bundle the recovery engine, Python runtime, FFmpeg/ffprobe and ddrescue.
-- Remove Homebrew and Terminal setup from the end-user flow.
-- Build bundled media tools for macOS 14 arm64; include licenses and matching source archives.
-
-- Unify CD drive and local file recovery on one screen.
-- Fix detection of optical media reported with macOS WholeDisk metadata.
-- Refresh inserted media automatically and explain unsupported media or inspection failures.
-
-- Recovery from damaged VCD/SVCD discs is the main app flow.
-- Combine saved raw disc reads using sector addresses and EDC checksums.
-- Show recovered tracks, verified sectors and remaining uncertainty.
-- Review recovered tracks, then optionally clean up picture and sound or export H.264/H.265 copies.
-- Add a native Xcode project with signing configuration.
-- Add shared app versioning and local release packaging with SHA-256 checksums.
-
-This is the first planned public release. Developer ID signing is configured locally. Each final build is notarized and
-verified separately before publication.
+This is the first planned public release. Local test builds are reviewed before
+release packaging and notarization.

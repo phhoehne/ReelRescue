@@ -151,7 +151,6 @@ class VideoTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory(); cls.folder = Path(cls.temp.name)
-        cls.support_patch = patch.dict(r.os.environ,{"REEL_RESCUE_SUPPORT_ROOT":str(cls.folder/"app-support")});cls.support_patch.start()
         cls.source = cls.folder/"anamorphic.mp4"
         metadata = cls.folder/"chapters.txt"
         metadata.write_text(";FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=2000\ntitle=First\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=2000\nEND=4000\ntitle=Second\n")
@@ -161,36 +160,58 @@ class VideoTests(unittest.TestCase):
                         "-vf","setsar=8/5","-c:v","libx264","-preset","ultrafast","-c:a","aac",str(cls.source)],check=True)
 
     @classmethod
-    def tearDownClass(cls): cls.support_patch.stop(); cls.temp.cleanup()
+    def tearDownClass(cls): cls.temp.cleanup()
 
     def export(self, name, **options):
         folder = self.folder/name; folder.mkdir()
         with contextlib.redirect_stdout(io.StringIO()):
             return r.export_video(self.source,folder,dict(preset="native",enhance=False,hardware=False,**options))
 
-    def test_job_keeps_playable_video_separate_from_diagnostics(self):
-        with contextlib.redirect_stdout(io.StringIO()) as output:
+    def test_job_publishes_only_video_and_discards_temporary_files(self):
+        parent=self.folder/"scratch";parent.mkdir()
+        with patch.object(r.tempfile,"tempdir",str(parent)), contextlib.redirect_stdout(io.StringIO()) as output:
             r.job(dict(mode="video",sources=[str(self.source)],destination=str(self.folder),preset="native",enhance=False,hardware=False))
-        event=json.loads(output.getvalue().splitlines()[-1]);p=Path(event["project"]);work=Path(event["details"])
+        event=json.loads(output.getvalue().splitlines()[-1]);p=Path(event["project"])
         self.assertEqual({x.name for x in p.iterdir()},{"Film.mp4"})
-        self.assertTrue((work/"Rendered/Diagnostics/Film_encode.log").exists())
-        self.assertTrue((work/"Rendered/Diagnostics/Film_decode.command.json").exists())
-        self.assertTrue((work/"Rendered/Diagnostics/Film_validation.json").exists())
-        report=json.loads((work/"Diagnostics/report.json").read_text())
-        self.assertEqual(report["layout_version"],3)
-        self.assertEqual(report["status"],"complete")
-        self.assertTrue(report["outputs"][0]["audio_bitstream_identical"])
+        self.assertEqual(list(parent.iterdir()),[])
+        self.assertNotIn("details",event)
+        self.assertEqual(event["report"]["layout_version"],4)
+        self.assertTrue(event["report"]["outputs"][0]["audio_bitstream_identical"])
 
-    def test_failed_recovery_keeps_diagnostics_and_source(self):
+    def test_failed_recovery_discards_working_files_and_preserves_source(self):
         source=self.folder/"bad-image.bin";source.write_bytes(b"unreadable source")
-        with contextlib.redirect_stdout(io.StringIO()) as output:
+        parent=self.folder/"failure-scratch";parent.mkdir()
+        with patch.object(r.tempfile,"tempdir",str(parent)), contextlib.redirect_stdout(io.StringIO()) as output:
             with self.assertRaises(r.RescueError):
                 r.job(dict(mode="images",sources=[str(source)],destination=str(self.folder)))
-        event=json.loads(output.getvalue().splitlines()[0]);p=Path(event["path"]);work=Path(event["details"])
-        self.assertEqual(json.loads((work/"Diagnostics/report.json").read_text())["status"],"failed")
-        self.assertTrue((work/"Recovery data").is_dir())
+        event=json.loads(output.getvalue().splitlines()[0]);p=Path(event["path"])
+        self.assertEqual(list(parent.iterdir()),[])
         self.assertEqual(list(p.iterdir()),[])
         self.assertEqual(source.read_bytes(),b"unreadable source")
+
+    def test_cancelled_recovery_removes_all_temporary_work(self):
+        parent=self.folder/"cancelled-scratch";parent.mkdir()
+        with patch.object(r.tempfile,"tempdir",str(parent)), patch.object(r,"merge_images",side_effect=r.Cancelled), contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaises(r.Cancelled):
+                r.job(dict(mode="images",sources=[str(self.source)],destination=str(self.folder)))
+        event=json.loads(output.getvalue().splitlines()[0])
+        self.assertEqual(list(Path(event["path"]).iterdir()),[])
+        self.assertEqual(list(parent.iterdir()),[])
+        self.assertTrue(self.source.exists())
+
+    def test_combine_mpeg_tracks_without_reencoding(self):
+        folder=self.folder/"combine";folder.mkdir();sources=[]
+        for index in range(2):
+            path=folder/f"source{index}.mpg"
+            subprocess.run([r.tool("ffmpeg"),"-v","error","-f","lavfi","-i","testsrc2=size=480x576:rate=25:duration=1", "-f","lavfi","-i","sine=frequency=440:duration=1", "-target","pal-svcd","-t","1",str(path)],check=True)
+            sources.append(str(path))
+        with contextlib.redirect_stdout(io.StringIO()):record=r.combine_tracks(sources,folder)
+        self.assertTrue(record["stream_copy"])
+        self.assertEqual(r.decoded_frames(record["file"]),50)
+        def audio_payload(path):
+            return subprocess.check_output([r.tool("ffmpeg"),"-v","error","-i",str(path),"-map","0:a:0","-c","copy","-f","data","-"],stderr=subprocess.DEVNULL)
+        self.assertEqual(audio_payload(record["file"]),b"".join(audio_payload(path) for path in sources))
+        self.assertEqual(next(s for s in r.probe(record["file"])["streams"] if s["codec_type"]=="video")["codec_name"],"mpeg2video")
 
     def test_native_geometry_chapters_audio_and_frame_count(self):
         result = self.export("native")

@@ -30,8 +30,6 @@ final class Model: ObservableObject {
     @Published var destination = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first!
     @Published var preset = "native"
     @Published var enhance = false
-    @Published var retry = true
-    @Published var makeVideos = true
     @Published var audioRanges = ""
     @Published var holdRanges = ""
     @Published var previewStart = "0:00"
@@ -43,7 +41,6 @@ final class Model: ObservableObject {
     @Published var error = ""
     @Published var log = ""
     @Published var project: URL?
-    @Published var recoveryDetails: URL?
     @Published var result: URL?
     @Published var recoveredVideos: [URL] = []
     @Published var selectedRecoveredVideo = ""
@@ -201,13 +198,13 @@ final class Model: ObservableObject {
         if p.runModal() == .OK, let url = p.url { destination = url }
     }
 
-    func start(preview: Bool = false) {
+    func start(preview: Bool = false, combine: Bool = false) {
         guard canRun, let py = python else { return }
         player?.pause(); busy = true; phase = "Preparing"; detail = ""
-        error = ""; warning = ""; log = ""; fraction = nil; project = nil; recoveryDetails = nil; result = nil
+        error = ""; warning = ""; log = ""; fraction = nil; project = nil; result = nil
         recoveryVerified = nil; recoveryUncertain = 0; recoveredVideos = []; selectedRecoveredVideo = ""
-        var settings: [String: Any] = ["mode": jobMode, "sources": sources.map(\.path), "destination": destination.path,
-                                      "preset": preset, "enhance": enhance, "retry": retry, "export": makeVideos,
+        var settings: [String: Any] = ["mode": combine ? "combine" : jobMode, "sources": combine ? latestRecoveredVideos.map(\.path) : sources.map(\.path), "destination": destination.path,
+                                      "preset": preset, "enhance": enhance,
                                       "audio_ranges": audioRanges, "hold_ranges": holdRanges, "preview_start": previewStart,
                                       "preview": preview, "hardware": true]
         if let cue { settings["cue"] = cue.path }
@@ -241,7 +238,7 @@ final class Model: ObservableObject {
             DispatchQueue.main.async {
                 self.busy = false; self.process = nil
                 if self.result == nil && self.error.isEmpty && self.phase != "Stopped" {
-                    self.error = "The task ended before a verified result was produced. Open Recovery details to inspect the logs."
+                    self.error = "The task ended before a verified result was produced. See Task details for the error."
                     self.phase = "Needs attention"
                 }
             }
@@ -256,7 +253,6 @@ final class Model: ObservableObject {
         switch type {
         case "project":
             project = (e["path"] as? String).map { URL(fileURLWithPath: $0) }
-            recoveryDetails = (e["details"] as? String).map { URL(fileURLWithPath: $0) }
         case "progress":
             phase = e["phase"] as? String ?? phase; detail = e["detail"] as? String ?? ""; fraction = e["fraction"] as? Double
         case "warning": warning = e["message"] as? String ?? ""
@@ -285,10 +281,6 @@ final class Model: ObservableObject {
 
     func stop() { if process?.isRunning == true { phase = "Stopping safely"; process?.terminate() } }
     func revealProject() { if let project { NSWorkspace.shared.open(project) } }
-    func revealRecoveryDetails() {
-        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Reel Rescue/Projects")
-        NSWorkspace.shared.open(recoveryDetails ?? root)
-    }
     func playResult() { if let result { NSWorkspace.shared.open(result) } }
 }
 
@@ -311,7 +303,6 @@ struct ContentView: View {
     @EnvironmentObject var m: Model
     @State private var dropActive = false
     @State private var repairsExpanded = false
-    @State private var copiesExpanded = false
     @State private var earlierReadsExpanded = false
     private let driveRefresh = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
 
@@ -325,7 +316,7 @@ struct ContentView: View {
                         header
                         sourceArea
                         if m.workflow != .video && m.result != nil { recoveryResults }
-                        options
+                        if m.workflow == .video { options }
                         destination
                     }.padding(30).frame(maxWidth: .infinity, alignment: .leading)
                 }.disabled(m.busy)
@@ -343,7 +334,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Task details").font(.title2.bold())
                 ScrollView { Text(m.log.isEmpty ? "No messages yet." : m.log).textSelection(.enabled).font(.system(.body, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading) }
-                HStack { if m.recoveryDetails != nil { Button("Recovery details", action: m.revealRecoveryDetails) }; Spacer(); Button("Done") { m.showLog = false }.keyboardShortcut(.defaultAction) }
+                HStack { Spacer(); Button("Done") { m.showLog = false }.keyboardShortcut(.defaultAction) }
             }.padding(24).frame(width: 700, height: 480)
         }
     }
@@ -383,9 +374,6 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Recovery results").font(.headline).foregroundStyle(ink)
             Text(m.recoveredVideos.count == 1 ? "1 video track saved" : "\(m.recoveredVideos.count) video tracks saved").font(.title3.weight(.semibold))
-            if let verified = m.recoveryVerified {
-                Text("\(verified.formatted()) sectors verified · \(m.recoveryUncertain.formatted()) still uncertain").foregroundStyle(.secondary)
-            }
             if !m.recoveredVideos.isEmpty {
                 Picker("Track to review", selection: $m.selectedRecoveredVideo) {
                     ForEach(m.recoveredVideos, id: \.path) { url in Text(url.lastPathComponent).tag(url.path) }
@@ -448,6 +436,9 @@ struct ContentView: View {
                     }
                 }
             }
+            if m.workflow == .video && m.latestRecoveredVideos.count > 1 {
+                Button("Combine recovered tracks") { m.start(combine: true) }.disabled(!m.canRun)
+            }
             if m.workflow == .video, let player = m.player, !m.sources.isEmpty {
                 NativeVideoPlayer(player: player).frame(height: 235).background(.black).clipShape(RoundedRectangle(cornerRadius: 9))
                 HStack { Image(systemName: "film"); Text(m.sources[0].lastPathComponent).lineLimit(1).truncationMode(.middle); Spacer(); Button("Change video", action: m.chooseSource) }
@@ -486,20 +477,9 @@ struct ContentView: View {
     var options: some View {
         VStack(alignment: .leading, spacing: 14) {
             Divider()
-            if m.workflow != .video {
-                Text("Recovery settings").font(.headline).foregroundStyle(ink)
-                if m.usesDrive { Toggle("Retry uncertain sectors twice", isOn: $m.retry) }
-                DisclosureGroup("Viewing copy", isExpanded: $copiesExpanded) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Toggle("Create MP4 viewing copies", isOn: $m.makeVideos)
-                        exportOptions.disabled(!m.makeVideos)
-                    }.padding(.top, 12)
-                }
-            } else {
-                Text("Output").font(.headline).foregroundStyle(ink)
-                exportOptions
-                repairOptions
-            }
+            Text("Output").font(.headline).foregroundStyle(ink)
+            exportOptions
+            repairOptions
         }
     }
 
@@ -594,7 +574,6 @@ struct ContentView: View {
             ForEach(["ffmpeg", "ffprobe", "ddrescue"], id: \.self) { name in
                 HStack { Image(systemName: m.tools[name] != nil ? "checkmark.circle.fill" : "exclamationmark.circle").foregroundStyle(m.tools[name] != nil ? accent : .orange); Text(name); Spacer(); Text(m.tools[name] ?? "Unavailable").font(.caption).foregroundStyle(.secondary) }
             }
-            Button("Recovery details", action: m.revealRecoveryDetails)
             Button("Open third-party licenses") {
                 if let url = Bundle.main.resourceURL?.appendingPathComponent("runtime/licenses") { NSWorkspace.shared.open(url) }
             }
@@ -612,7 +591,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if let m = Self.model, m.busy {
             let alert = NSAlert(); alert.messageText = "Stop the current task and quit?"
-            alert.informativeText = "Originals remain untouched. Partial files and recovery maps will be kept."
+            alert.informativeText = "Temporary working files will be removed."
             alert.addButton(withTitle: "Keep working"); alert.addButton(withTitle: "Stop and quit")
             if alert.runModal() == .alertFirstButtonReturn { return .terminateCancel }
             m.stop()
