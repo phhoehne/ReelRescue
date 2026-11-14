@@ -1,0 +1,18 @@
+# Generated app bundles, media and tool outputs
+/build/
+/dist/
+DerivedData/
+*.dylib
+__pycache__/
+*.py[cod]
+.DS_Store
+xcuserdata/
+*.xcuserstate
+/Config/Developer.xcconfig
+*.mp4
+*.m4v
+*.mpg
+*.iso
+*.bin
+*.map
+*.zip

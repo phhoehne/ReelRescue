@@ -1,0 +1,6 @@
+// Local builds work without a development team. Set your team in Xcode later.
+CODE_SIGN_STYLE = Automatic
+DEVELOPMENT_TEAM =
+CODE_SIGN_IDENTITY = -
+PRODUCT_BUNDLE_IDENTIFIER = org.reelrescue.app
+#include? "Developer.xcconfig"

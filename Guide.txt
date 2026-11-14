@@ -1,0 +1,103 @@
+REEL RESCUE — Recover memories from damaged discs
+
+GET STARTED
+Open dist/Reel Rescue.app. The app opens on damaged-CD recovery.
+Insert a damaged Video CD or Super Video CD and refresh the drive list.
+If you already have raw reads, choose “From saved disc reads”. Select your
+sources and a folder, then click Start recovery. Every run creates a new
+project and opens originals read-only. Everything runs locally.
+
+RECOVER FIRST, THEN REVIEW
+Reel Rescue preserves the recovered disc image and original MPEG footage.
+It compares checksummed sectors across reads of the same disc, saves intact
+data and reports what remains uncertain. It cannot guarantee a perfect
+recovery or reconstruct footage that is completely missing.
+
+When recovery finishes, “What we recovered” shows saved tracks, verified
+sectors and remaining uncertainty. Open the recovery folder to inspect all
+files. Choose a track and “Review & clean up this track” for optional picture,
+sound or sharing improvements.
+
+A playable copy at the original display size is enabled by default. Expand
+“After recovery: make a viewing copy” to turn it off or choose another format.
+Enhancement is OFF by default. Cleanup, audio repairs and 1080p H.265 sharing
+remain available separately under “After recovery → Clean up & share”.
+
+RECOVER AN INSERTED CD
+Insert the CD and refresh the drive list. Only whole, read-only optical media
+exposing 2,352-byte sectors are accepted. You may also add older raw reads of
+the same disc. The first read uses GNU ddrescue with the actual sector size
+and saves its recovery map. Optional retries read uncertain sectors twice,
+up to 2,000 sectors. The app never formats, writes to, or unmounts the disc.
+If macOS denies raw-device access, the task reports that error; it does not
+ask for administrator credentials or change device permissions. You can
+still work with existing raw image files.
+
+RECOVER DISC IMAGES
+Choose one or more reads from THE SAME PHYSICAL CD. Supported inputs are
+whole-disc raw images with 2,352-byte sectors (often .bin, sometimes .iso).
+Ordinary 2,048-byte ISO images, DVDs, Blu-rays and multi-file CUE layouts are
+not supported by this recovery mode. Extracted MPEG files work in video mode.
+
+Reel Rescue checks sector EDC checksums, locates sectors by recorded address,
+and combines valid reads. Missing, unverified and conflicting sectors are
+reported, never silently declared repaired. Checksum validation is evidence
+about sectors, not a guarantee that the recording is perfect. Mode 2 address
+bytes are not covered by EDC; severely corrupted addresses remain a limit.
+The image's end is inferred from the available addresses when no physical
+disc is read, so unavailable trailing sectors cannot always be identified.
+
+Tracks are discovered from the VCD/SVCD disc directory. If that directory is
+damaged, add the original single-file Mode 2/2352 CUE sheet. Do not invent
+track boundaries. Original MPEG payloads, a recovered raw image, reports and
+optional playable exports are kept together. Separate tracks remain separate
+videos in this version. To inspect or enhance one further, open its MPEG or
+viewing copy in Clean up & share.
+
+OPTIONAL CLEANUP AND SHARING
+• Drop a video in the window, or use Choose video / Command-O.
+• Original display size: H.264 with correct square-pixel geometry.
+• 1080p high quality: H.264, Apple hardware quality 85.
+• 1080p sharing: H.265/HEVC, Apple hardware quality 65 and hvc1 compatibility.
+• 1080p fits the full image inside 1920×1080 without stretching or cropping.
+• Interlaced sources identified by their metadata are deinterlaced to fields.
+• Gentle enhancement applies light noise reduction and restrained sharpening.
+  It is optional and OFF by default. No face reconstruction, beautification,
+  generated detail or invented voices are used. Normal filtering and lossy
+  compression still change pixels; compare a preview before a long export.
+• Preview 10 seconds tests picture settings at the chosen start time.
+• Repair specific moments accepts ranges such as 01:23.4-01:24.0, one per line.
+  Audio repair reduces clicks; it cannot restore missing speech or music.
+  Frame holds repeat the last intact frame through a marked defect, at most
+  two seconds. Use a full export to review these precisely timed repairs.
+• Play copy plays the output. New copy returns to the controls.
+
+PROGRESS, STOPPING AND CHECKS
+Stop terminates processing and keeps partial work plus recovery maps.
+Completed video files are published only after decoding and basic timing,
+dimension, frame-count and audio checks. Passing these checks means the file
+is playable; it does not mean all visible or audible source defects are gone.
+Outputs contain report.json, settings.json, exact encoder commands, logs,
+validation records and SHA256 checksums. Partial files are clearly named.
+Keep originals and raw recoveries even after producing a good viewing copy.
+
+REQUIREMENTS
+This build is for Apple Silicon Macs running macOS 14 or later. It is a local,
+ad-hoc signed personal build, not a notarized App Store release. Python 3,
+FFmpeg and ffprobe must be installed separately; ddrescue is only needed for
+reading physical CDs. Install these tools before running the app.
+With Homebrew installed: brew install python ffmpeg ddrescue
+No dependencies are downloaded automatically. Help & setup shows readiness.
+If hardware encoding is unavailable, a software H.264/H.265 fallback runs
+more slowly and may produce a different file size at comparable quality.
+
+SOURCE AND REBUILD
+native/ReelRescue.swift is the SwiftUI interface.
+backend/reel_rescue.py is the standard-library Python recovery engine.
+backend/edc.c accelerates CD checksums; a Python fallback is available.
+Open ReelRescue.xcodeproj in Xcode, or run ./build.sh with Xcode installed.
+Run python3 -m unittest discover -s tests -v for focused engine tests.
+
+This first version focuses on VCD/SVCD and conventional video exports. It
+does not include AI super-resolution, automatic scene reconstruction, a
+timeline editor, automatic track joining, or guaranteed damaged-disc repair.
