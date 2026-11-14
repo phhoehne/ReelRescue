@@ -93,6 +93,33 @@ except r.Cancelled:
             with self.assertRaises(r.RescueError): r.ranges(text, 200)
         with self.assertRaises(r.RescueError): r.ranges("1-4", 10, hold=True)
 
+    def test_current_macos_wholedisk_metadata_disc_detection(self):
+        info = dict(WholeDisk=True, Content="CD_partition_scheme", DeviceBlockSize=2352,
+                    TotalSize=562292640, Writable=False, WritableMedia=False,
+                    OpticalMediaType="CD-ROM", DeviceIdentifier="disk10", MediaName="USB optical drive")
+        listing = dict(AllDisksAndPartitions=[dict(Content="CD_partition_scheme", DeviceIdentifier="disk10")])
+        def output(command, **kwargs):
+            return plistlib.dumps(listing if command[1] == "list" else info)
+        with patch.object(r.subprocess, "check_output", side_effect=output):
+            found = r.disc_inventory()
+            self.assertEqual(found["discs"][0]["device"], "/dev/disk10")
+        for changes in (dict(WholeDisk=False), dict(WritableMedia=True), dict(DeviceBlockSize=2048)):
+            with patch.object(r.subprocess, "check_output", return_value=plistlib.dumps(dict(info, **changes))):
+                with self.assertRaises(r.RescueError): r.disk_info("/dev/disk10")
+
+    def test_drive_inventory_explains_unsupported_media_and_errors(self):
+        listing = dict(AllDisksAndPartitions=[dict(Content="CD_partition_scheme", DeviceIdentifier="disk10")])
+        with patch.object(r.subprocess,"check_output",return_value=plistlib.dumps(listing)), \
+             patch.object(r,"disk_info",side_effect=r.RescueError("Unsupported sector size")):
+            found = r.disc_inventory()
+            self.assertEqual(found["discs"], [])
+            self.assertIn("Unsupported sector size", found["message"])
+        with patch.object(r.subprocess,"check_output",side_effect=subprocess.TimeoutExpired("diskutil",12)):
+            self.assertIn("could not list",r.disc_inventory()["message"])
+        with patch.object(r.subprocess,"check_output",side_effect=[plistlib.dumps(dict(AllDisksAndPartitions=[])),
+             json.dumps(dict(SPDiscBurningDataType=[dict(_name="USB CD drive")])).encode()]):
+            self.assertIn("Drive connected: USB CD drive", r.disc_inventory()["message"])
+
     def test_device_guard_rejects_writable_and_nonoptical(self):
         base = dict(Whole=True, Content="CD_partition_scheme", DeviceBlockSize=2352,
                     TotalSize=2352*1000, Writable=False, DeviceIdentifier="disk10")

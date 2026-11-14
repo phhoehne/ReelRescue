@@ -8,15 +8,22 @@ private let accent = Color(red: 0.0, green: 0.43, blue: 0.48)
 private let mist = Color(red: 0.94, green: 0.96, blue: 0.97)
 
 enum Workflow: String, CaseIterable {
-    case disc = "From a damaged CD"
-    case images = "From saved disc reads"
+    case recovery = "Recover footage"
     case video = "Clean up & share"
-    var key: String { switch self { case .video: return "video"; case .images: return "images"; case .disc: return "disc" } }
-    var symbol: String { switch self { case .video: return "film"; case .images: return "square.stack.3d.up"; case .disc: return "opticaldisc" } }
+    var symbol: String { self == .video ? "film" : "opticaldisc" }
+}
+
+enum RecoverySource: String, CaseIterable {
+    case disc = "CD drive"
+    case files = "Local files"
 }
 
 final class Model: ObservableObject {
-    @Published var workflow: Workflow = .disc
+    @Published var workflow: Workflow = .recovery
+    @Published var recoverySource: RecoverySource = .disc
+    @Published var driveMessage = "Checking for an inserted CD…"
+    var usesDrive: Bool { workflow == .recovery && recoverySource == .disc }
+    var jobMode: String { workflow == .video ? "video" : usesDrive ? "disc" : "images" }
     @Published var sources: [URL] = []
     @Published var cue: URL?
     @Published var destination = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first!
@@ -53,7 +60,7 @@ final class Model: ObservableObject {
     var backend: String { Bundle.main.resourceURL!.appendingPathComponent("backend/reel_rescue.py").path }
     var ready: Bool { python != nil && tools["ffmpeg"] != nil && tools["ffprobe"] != nil }
     var canRun: Bool {
-        ready && !busy && (workflow == .disc ? !selectedDrive.isEmpty && tools["ddrescue"] != nil : !sources.isEmpty)
+        ready && !busy && (usesDrive ? !selectedDrive.isEmpty && tools["ddrescue"] != nil : !sources.isEmpty)
     }
 
     init() {
@@ -70,7 +77,7 @@ final class Model: ObservableObject {
         if let i = args.firstIndex(of: "--demo-destination"), i + 1 < args.count {
             destination = URL(fileURLWithPath: args[i+1])
         }
-        if workflow == .disc { refreshDrives() }
+        if workflow == .recovery { refreshDrives() }
     }
 
     func selectWorkflow(_ next: Workflow, video: URL? = nil) {
@@ -81,7 +88,7 @@ final class Model: ObservableObject {
         workflow = next; phase = "Ready when you are"
         detail = next == .video ? "Choose recovered footage to review, clean up or share." : "Choose a source to start recovering your footage."
         if let video { add([video]) }
-        if next == .disc { refreshDrives() }
+        if next == .recovery { refreshDrives() }
     }
 
     func reviewRecovered() {
@@ -116,13 +123,29 @@ final class Model: ObservableObject {
     }
 
     func refreshDrives() {
-        guard python != nil else { refreshing = false; return }
+        guard !refreshing, !busy, python != nil else { return }
         refreshing = true
-        invoke(["discs"]) { data in
-            self.drives = (try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]) ?? []
-            self.selectedDrive = self.drives.first?["device"] as? String ?? ""
+        invoke(["devices"]) { data in
+            guard let response = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                self.drives = []; self.selectedDrive = ""
+                self.driveMessage = "Could not inspect the drive. Check Help & setup, then refresh."
+                self.refreshing = false
+                return
+            }
+            self.drives = response["discs"] as? [[String: Any]] ?? []
+            if !self.drives.contains(where: { $0["device"] as? String == self.selectedDrive }) {
+                self.selectedDrive = self.drives.first?["device"] as? String ?? ""
+            }
+            self.driveMessage = response["message"] as? String ?? ""
             self.refreshing = false
         }
+    }
+
+    func changeRecoverySource() {
+        result = nil; error = ""; warning = ""; fraction = nil
+        recoveryVerified = nil; recoveredVideos = []; phase = "Ready when you are"
+        detail = recoverySource == .disc ? "Select your inserted CD to start recovery." : "Choose saved raw disc reads to recover."
+        if recoverySource == .disc { refreshDrives() }
     }
 
     func chooseSource() {
@@ -164,12 +187,12 @@ final class Model: ObservableObject {
         player?.pause(); busy = true; phase = "Preparing"; detail = "Creating a separate output project"
         error = ""; warning = ""; log = ""; fraction = nil; project = nil; result = nil
         recoveryVerified = nil; recoveryUncertain = 0; recoveredVideos = []; selectedRecoveredVideo = ""
-        var settings: [String: Any] = ["mode": workflow.key, "sources": sources.map(\.path), "destination": destination.path,
+        var settings: [String: Any] = ["mode": jobMode, "sources": sources.map(\.path), "destination": destination.path,
                                       "preset": preset, "enhance": enhance, "retry": retry, "export": makeVideos,
                                       "audio_ranges": audioRanges, "hold_ranges": holdRanges, "preview_start": previewStart,
                                       "preview": preview, "hardware": true]
         if let cue { settings["cue"] = cue.path }
-        if workflow == .disc {
+        if usesDrive {
             settings["device"] = selectedDrive
             settings["device_identity"] = drives.first(where: { $0["device"] as? String == selectedDrive })?["identity"]
         }
@@ -263,6 +286,7 @@ struct ContentView: View {
     @State private var repairsExpanded = false
     @State private var copiesExpanded = false
     @State private var earlierReadsExpanded = false
+    private let driveRefresh = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
 
     var body: some View {
         HStack(spacing: 0) {
@@ -284,6 +308,10 @@ struct ContentView: View {
         }
         .frame(minWidth: 960, minHeight: 740)
         .tint(accent)
+        .onReceive(driveRefresh) { _ in
+            if m.usesDrive { m.refreshDrives() }
+        }
+        .onChange(of: m.recoverySource) { _, _ in m.changeRecoverySource() }
         .sheet(isPresented: $m.showHelp) { help }
         .sheet(isPresented: $m.showLog) {
             VStack(alignment: .leading, spacing: 16) {
@@ -303,7 +331,7 @@ struct ContentView: View {
             }.padding(.top, 22)
             VStack(spacing: 6) {
                 ForEach(Workflow.allCases, id: \.self) { workflow in
-                    if workflow == .disc {
+                    if workflow == .recovery {
                         Text("Recover footage").font(.caption.weight(.semibold)).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.bottom, 6)
                     }
                     if workflow == .video {
@@ -330,7 +358,7 @@ struct ContentView: View {
 
     var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(m.workflow == .disc ? "Rescue footage from a damaged CD" : m.workflow == .images ? "Recover from saved disc reads" : "Clean up & share recovered footage").font(.system(size: 30, weight: .semibold, design: .rounded)).foregroundStyle(ink)
+            Text(m.workflow == .video ? "Clean up & share recovered footage" : "Recover footage from a damaged disc").font(.system(size: 30, weight: .semibold, design: .rounded)).foregroundStyle(ink)
             Text(m.workflow == .video ? "Review what you recovered. Make optional picture, sound and sharing improvements." : "Bring back footage from damaged Video CDs and Super Video CDs—even when they won’t mount or play normally.")
                 .font(.body).foregroundStyle(.secondary)
             if !m.ready { Label(m.dependencyMessage, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
@@ -371,16 +399,21 @@ struct ContentView: View {
 
     var sourceArea: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if m.workflow == .disc {
+            if m.workflow == .recovery {
+                Text("Recovery source").font(.headline).foregroundStyle(ink)
+                Picker("Recover from", selection: $m.recoverySource) {
+                    ForEach(RecoverySource.allCases, id: \.self) { source in
+                        Text(source.rawValue).tag(source)
+                    }
+                }.pickerStyle(.segmented).frame(maxWidth: 360)
+            }
+            if m.usesDrive {
                 HStack {
                     Label("Inserted VCD / SVCD", systemImage: "opticaldisc").font(.headline)
-                    Spacer(); Button(m.refreshing ? "Refreshing…" : "Refresh", action: m.refreshDrives).disabled(m.refreshing)
+                    Spacer()
+                    Button(m.refreshing ? "Checking…" : "Refresh", action: m.refreshDrives).disabled(m.refreshing)
                 }
-                if m.drives.isEmpty {
-                    Text("Insert your damaged VCD or SVCD, then refresh. You can also recover from saved disc reads without the original CD.")
-                        .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    Button("Use saved disc reads instead") { m.selectWorkflow(.images) }
-                } else {
+                if !m.drives.isEmpty {
                     Picker("CD drive", selection: $m.selectedDrive) {
                         ForEach(m.drives.indices, id: \.self) { i in
                             let d = m.drives[i]
@@ -388,8 +421,11 @@ struct ContentView: View {
                         }
                     }
                 }
-            }
-            if m.workflow == .disc {
+                Label(m.driveMessage, systemImage: m.drives.isEmpty ? "info.circle" : "checkmark.circle")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if m.tools["ddrescue"] == nil && m.ready {
+                    Text("Reading a physical CD requires GNU ddrescue. Open Help & setup to install it.").font(.caption).foregroundStyle(.orange)
+                }
                 DisclosureGroup("Add earlier reads of this disc (optional)", isExpanded: $earlierReadsExpanded) {
                     sourceFiles.padding(.top, 12)
                 }
@@ -405,7 +441,7 @@ struct ContentView: View {
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: m.workflow == .video ? "film.stack" : "opticaldisc").font(.system(size: 32, weight: .light)).foregroundStyle(accent)
-                    Text(m.workflow == .video ? "Drop a video here" : m.workflow == .disc ? "Add earlier reads, if you have them" : "Drop images from the same CD here").font(.headline)
+                    Text(m.workflow == .video ? "Drop a video here" : m.usesDrive ? "Add earlier reads, if you have them" : "Drop images from the same CD here").font(.headline)
                     Text(m.workflow == .video ? "MP4, M4V, MPEG, MOV and other FFmpeg-readable videos" : "Raw .bin or .iso images • optional single-file .cue sheet")
                         .font(.callout).foregroundStyle(.secondary)
                     Button(m.workflow == .video ? "Choose video…" : "Choose images…", action: m.chooseSource).controlSize(.large)
@@ -440,7 +476,7 @@ struct ContentView: View {
             Divider()
             if m.workflow != .video {
                 Text("Recovery settings").font(.headline).foregroundStyle(ink)
-                if m.workflow == .disc { Toggle("Retry uncertain sectors twice", isOn: $m.retry) }
+                if m.usesDrive { Toggle("Retry uncertain sectors twice", isOn: $m.retry) }
                 Label("Preserve the recovered disc image and original video streams", systemImage: "checkmark.shield").font(.callout)
                 Text("Compare reads from the same disc to recover more intact data. Missing or conflicting sectors are listed in your recovery report.").font(.caption).foregroundStyle(.secondary)
                 DisclosureGroup("After recovery: make a viewing copy", isExpanded: $copiesExpanded) {

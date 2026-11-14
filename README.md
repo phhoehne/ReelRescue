@@ -71,7 +71,7 @@ This is an early project built from a real damaged-disc recovery workflow. Physi
 
 ### From a damaged CD
 
-1. Open Reel Rescue and select **From a damaged CD**.
+1. Open Reel Rescue and select **Recover footage → CD drive**.
 2. Insert a recorded VCD or SVCD and refresh the drive list.
 3. Optionally add earlier raw reads of that same physical disc.
 4. Choose where to save the recovery project and click **Start recovery**.
@@ -80,7 +80,7 @@ Only compatible whole, read-only optical media are accepted. If macOS denies raw
 
 ### From saved disc reads
 
-1. Select **From saved disc reads**.
+1. Select **Recover footage → Local files**.
 2. Add one or more whole-disc raw `.bin` or `.iso` images from the **same physical disc**.
 3. Add the original single-file CUE sheet if the app cannot read the track directory.
 4. Choose an output folder and click **Start recovery**.

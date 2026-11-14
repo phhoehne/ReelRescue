@@ -2,6 +2,10 @@
 
 ## 1.1.0 — Unreleased
 
+- Unify CD drive and local file recovery on one screen.
+- Fix detection of optical media reported with macOS WholeDisk metadata.
+- Refresh inserted media automatically and explain unsupported media or inspection failures.
+
 - Recovery from damaged VCD/SVCD discs is the main app flow.
 - Combine saved raw disc reads using sector addresses and EDC checksums.
 - Show recovered tracks, verified sectors and remaining uncertainty.

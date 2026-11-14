@@ -340,9 +340,9 @@ def disk_info(device):
     except Exception as e:
         raise RescueError("macOS could not inspect this disc. Insert it and refresh the device list.") from e
     optical = info.get("OpticalDeviceType") or info.get("OpticalMediaType") or info.get("Content") == "CD_partition_scheme"
-    if not info.get("Whole") or not optical:
+    if not info.get("WholeDisk", info.get("Whole", False)) or not optical:
         raise RescueError("This device is not a whole optical disc. Hard drives and partitions are never accepted.")
-    if info.get("Writable") is True or info.get("MediaReadOnly") is False:
+    if any(info.get(k) is True for k in ("Writable", "WritableMedia")) or info.get("MediaReadOnly") is False:
         raise RescueError("The selected media is not read-only. Only recorded optical media can be captured.")
     if int(info.get("DeviceBlockSize", 0)) != RAW:
         raise RescueError("This disc does not expose 2,352-byte raw CD sectors. This version supports VCD/SVCD CDs, not DVDs or Blu-rays.")
@@ -354,17 +354,43 @@ def disk_info(device):
                 identity={k: info.get(k) for k in ("DeviceIdentifier","MediaName","TotalSize","DeviceBlockSize","BusProtocol")})
 
 
-def discs():
+def disc_inventory():
+    """Report supported inserted media, attached empty drives, and inspection errors."""
     try:
-        listing = plistlib.loads(subprocess.check_output(["/usr/sbin/diskutil","list","-plist"],stderr=subprocess.DEVNULL,timeout=12))
+        listing = plistlib.loads(subprocess.check_output(["/usr/sbin/diskutil", "list", "-plist"],
+            stderr=subprocess.DEVNULL, timeout=12))
     except Exception:
-        return []
-    results = []
+        return dict(discs=[], message="macOS could not list attached discs. Check the drive connection and refresh.")
+    results, rejected = [], []
     for d in listing.get("AllDisksAndPartitions", []):
-        if d.get("Content") != "CD_partition_scheme": continue
-        try: results.append(disk_info("/dev/" + d["DeviceIdentifier"]))
-        except RescueError: continue
-    return results
+        # Include unknown layouts; disk_info still rejects non-optical devices.
+        if d.get("Content", "") not in ("CD_partition_scheme", "", "Apple_partition_scheme"):
+            continue
+        identifier = d.get("DeviceIdentifier", "")
+        if not re.fullmatch(r"disk\d+", identifier):
+            continue
+        try:
+            results.append(disk_info("/dev/" + identifier))
+        except RescueError as e:
+            if d.get("Content") == "CD_partition_scheme":
+                rejected.append(str(e))
+    if results:
+        return dict(discs=results, message="Inserted CD detected. Ready to recover.")
+    if rejected:
+        return dict(discs=[], message="CD detected: " + " ".join(dict.fromkeys(rejected)))
+    try:
+        hardware = json.loads(subprocess.check_output(["/usr/sbin/system_profiler", "SPDiscBurningDataType", "-json"],
+            stderr=subprocess.DEVNULL, timeout=8)).get("SPDiscBurningDataType", [])
+        if hardware:
+            names = ", ".join(d.get("_name", "Optical drive") for d in hardware)
+            return dict(discs=[], message=f"Drive connected: {names}. No supported readable CD is available yet. Insert a VCD/SVCD and refresh.")
+    except Exception:
+        pass
+    return dict(discs=[], message="No readable CD detected. Connect an optical drive and insert a VCD/SVCD, or choose local files.")
+
+
+def discs():
+    return disc_inventory()["discs"]
 
 
 def capture(device, folder, expected=None):
@@ -625,11 +651,12 @@ def job(config):
 
 def main():
     signal.signal(signal.SIGTERM,cancel); signal.signal(signal.SIGINT,cancel)
-    parser = argparse.ArgumentParser(); parser.add_argument("command",choices=["doctor","discs","job"]); parser.add_argument("path",nargs="?")
+    parser = argparse.ArgumentParser(); parser.add_argument("command",choices=["doctor","discs","devices","job"]); parser.add_argument("path",nargs="?")
     args = parser.parse_args()
     try:
         if args.command == "doctor": print(json.dumps(doctor()),flush=True)
         elif args.command == "discs": print(json.dumps(discs()),flush=True)
+        elif args.command == "devices": print(json.dumps(disc_inventory()),flush=True)
         elif not args.path: raise RescueError("A job settings file is required.")
         else: job(json.loads(Path(args.path).read_text()))
     except Cancelled:

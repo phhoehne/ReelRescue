@@ -1,9 +1,9 @@
 REEL RESCUE — Recover memories from damaged discs
 
 GET STARTED
-Open dist/Reel Rescue.app. The app opens on damaged-CD recovery.
+Open dist/Reel Rescue.app. The app opens on a single recovery screen with CD drive and Local files choices.
 Insert a damaged Video CD or Super Video CD and refresh the drive list.
-If you already have raw reads, choose “From saved disc reads”. Select your
+If you already have raw reads, select “Local files” on the recovery screen. Select your
 sources and a folder, then click Start recovery. Every run creates a new
 project and opens originals read-only. Everything runs locally.
 
