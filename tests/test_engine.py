@@ -167,6 +167,18 @@ class VideoTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             return r.export_video(self.source,folder,dict(preset="native",enhance=False,hardware=False,**options))
 
+    def test_valid_irregular_timestamps_are_not_reported_as_decode_errors(self):
+        folder=self.folder/"precise-timestamps";folder.mkdir()
+        source=folder/"source.mp4"
+        subprocess.run([r.tool("ffmpeg"),"-v","error","-f","lavfi","-i","testsrc2=size=160x120:rate=25:duration=2",
+            "-vf","settb=1/1000,setpts='if(eq(N,2),41,N*40)'","-fps_mode","passthrough","-enc_time_base:v","1:1000",
+            "-c:v","libx264","-bf","0","-video_track_timescale","1000",str(source)],check=True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            record=r.export_video(source,folder,dict(preset="native",enhance=False,hardware=False),prefix="Precise")
+        self.assertTrue(Path(record["file"]).is_file())
+        self.assertEqual(record["decode_errors"],0)
+        self.assertEqual(r.decoded_frames(record["file"]),r.decoded_frames(source))
+
     def test_job_publishes_only_video_and_discards_temporary_files(self):
         parent=self.folder/"scratch";parent.mkdir()
         (self.folder/"output").mkdir()

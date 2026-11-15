@@ -661,7 +661,9 @@ def export_video(source, folder, options, prefix="Film", recovering=False, previ
     if audio_copy and not preview:
         audio_same = stream_hash(source,"0:a:0") == stream_hash(partial,"0:a:0")
         if not audio_same: raise RescueError("The copied audio did not match the source.")
-    run([tool("ffmpeg"),"-nostdin","-hide_banner","-v","error","-threads","4","-i",str(partial),"-map","0:v:0","-map","0:a:0?","-progress","pipe:1","-f","null","-"],
+    # Keep the MP4 time base during decoding. The null muxer otherwise rounds
+    # valid close-spaced frames to nominal frame ticks and falsely reports DTS errors.
+    run([tool("ffmpeg"),"-nostdin","-hide_banner","-v","error","-threads","4","-i",str(partial),"-map","0:v:0","-map","0:a:0?","-fps_mode","passthrough","-enc_time_base:v","demux","-progress","pipe:1","-f","null","-"],
         diagnostics / (prefix + "_decode.log"), "Validating playback", float(out["format"]["duration"]))
     if (diagnostics / (prefix + "_decode.log")).read_text().strip():
         raise RescueError("The exported video reported decoding errors.")
