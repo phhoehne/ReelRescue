@@ -59,6 +59,7 @@ final class Model: ObservableObject {
     @Published var log = ""
     @Published var project: URL?
     @Published var result: URL?
+    @Published var savedVideos: [URL] = []
     @Published var recoveredVideos: [URL] = []
     @Published var selectedRecoveredVideo = ""
     @Published var latestRecoveredVideos: [URL] = []
@@ -115,7 +116,7 @@ final class Model: ObservableObject {
         let available = previousEnhancementSources.filter { FileManager.default.fileExists(atPath: $0.path) }
         let recovered = latestRecoveredVideos.filter { FileManager.default.fileExists(atPath: $0.path) }
         let defaultVideos = video.map { [$0] } ?? (!available.isEmpty ? available : recovered)
-        player?.pause(); player = nil; sources = []; cue = nil; result = nil
+        player?.pause(); player = nil; sources = []; cue = nil; result = nil; savedVideos = []
         audioRanges = ""; holdRanges = ""; error = ""; warning = ""; fraction = nil
         recoveryVerified = nil; recoveryUncertain = 0; recoveredVideos = []; selectedRecoveredVideo = ""
         workflow = next; phase = "Ready"
@@ -204,7 +205,7 @@ final class Model: ObservableObject {
                 else if !sources.contains(url) { sources.append(url) }
             }
         }
-        error = ""; result = nil; recoveryVerified = nil; recoveredVideos = []
+        error = ""; result = nil; savedVideos = []; recoveryVerified = nil; recoveredVideos = []
         detail = ""
     }
 
@@ -222,7 +223,7 @@ final class Model: ObservableObject {
     func start(preview: Bool = false) {
         guard canRun, let py = python else { return }
         player?.pause(); busy = true; phase = "Preparing"; detail = ""
-        error = ""; warning = ""; log = ""; fraction = nil; project = nil; result = nil
+        error = ""; warning = ""; log = ""; fraction = nil; project = nil; result = nil; savedVideos = []
         recoveryVerified = nil; recoveryUncertain = 0; recoveredVideos = []; selectedRecoveredVideo = ""
         var settings: [String: Any] = ["mode": jobMode, "sources": sources.map(\.path), "combine": combineOutput, "output_name": outputName, "destination": destination.path,
                                       "preset": preset, "enhance": enhance,
@@ -284,7 +285,11 @@ final class Model: ObservableObject {
         case "complete":
             phase = workflow == .video ? "Videos ready" : "Recovery finished"; fraction = 1
             result = (e["path"] as? String).map { URL(fileURLWithPath: $0) }
-            if workflow != .video, let report = e["report"] as? [String: Any] {
+            let report = e["report"] as? [String: Any] ?? [:]
+            let outputs = report["outputs"] as? [[String: Any]] ?? []
+            savedVideos = outputs.compactMap { ($0["file"] as? String).map { URL(fileURLWithPath: $0) } }
+            if savedVideos.isEmpty, let result { savedVideos = [result] }
+            if workflow != .video {
                 let copies = report["outputs"] as? [[String: Any]] ?? []
                 let originals = report["extracted"] as? [[String: Any]] ?? []
                 recoveredVideos = (copies.isEmpty ? originals : copies).compactMap { ($0["file"] as? String).map { URL(fileURLWithPath: $0) } }
@@ -294,7 +299,10 @@ final class Model: ObservableObject {
                 previousEnhancementSources = recoveredVideos
                 latestRecoveredSelection = recoveredVideos.first
                 detail = ""
-            } else { detail = "" }
+            } else {
+                phase = savedVideos.count == 1 ? "Video saved" : "\(savedVideos.count) videos saved"
+                detail = savedVideos.map(\.path).joined(separator: "\n")
+            }
         case "cancelled": phase = "Stopped"; detail = e["message"] as? String ?? ""; fraction = nil
         case "error": phase = "Needs attention"; error = e["message"] as? String ?? "The task failed."; fraction = nil
         default: break
@@ -303,7 +311,11 @@ final class Model: ObservableObject {
     }
 
     func stop() { if process?.isRunning == true { phase = "Stopping safely"; process?.terminate() } }
-    func revealProject() { if let project { NSWorkspace.shared.open(project) } }
+    func revealProject() {
+        let existing = savedVideos.filter { FileManager.default.fileExists(atPath: $0.path) }
+        if !existing.isEmpty { NSWorkspace.shared.activateFileViewerSelecting(existing) }
+        else if let project { NSWorkspace.shared.open(project) }
+    }
     func playResult() { if let result { NSWorkspace.shared.open(result) } }
 }
 
@@ -587,7 +599,7 @@ struct ContentView: View {
             HStack(alignment: .center, spacing: 18) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(m.phase).font(.headline)
-                    if !m.detail.isEmpty { Text(m.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                    if !m.detail.isEmpty { Text(m.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle).textSelection(.enabled).help(m.detail) }
                     if m.busy {
                         if let f = m.fraction { ProgressView(value: f).frame(maxWidth: 340) }
                         else { ProgressView().controlSize(.small) }
@@ -597,7 +609,7 @@ struct ContentView: View {
                 if m.busy { Button("Stop", action: m.stop).controlSize(.large) }
                 else {
                     if m.result != nil {
-                        Button("Open videos", action: m.revealProject)
+                        Button("Show in Finder", action: m.revealProject)
                         if m.workflow == .video { Button("Play", action: m.playResult) }
                     }
                     Button(m.workflow == .video ? (m.combineOutput || m.sources.count == 1 ? "Create video" : "Create videos") : "Start recovery") { m.start() }

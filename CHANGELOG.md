@@ -2,6 +2,8 @@
 
 ## 1.1.0 — Unreleased
 
+- Show the actual saved output path on completion and select the created video files with Show in Finder.
+
 - Default enhancement to all newly recovered tracks, remember their locations across app launches, and allow switching to other footage or back to the recovered videos.
 
 - Unify enhancement and joining into one workflow with ordered inputs, separate/combined output, explicit names, and one Create action.

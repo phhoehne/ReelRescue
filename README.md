@@ -94,7 +94,7 @@ copies, with checks that compressed picture/audio payloads and decoded frame cou
 preserved. Choose an H.264 or H.265 format to apply optional enhancement or repairs in
 the same job, including after combining. Combining other video formats is not supported.
 Repair ranges refer to the resulting combined video, or to each separate output.
-The source videos are never renamed or changed. Use **Open videos** or **Play** when finished.
+The source videos are never renamed or changed. Completion shows the saved path. **Show in Finder** selects the created files; **Play** opens the first video.
 
 ## Saved files
 

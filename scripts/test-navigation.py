@@ -73,6 +73,10 @@ import AppKit
         precondition(manual.outputNames == ["Wedding.mpg"])
         manual.outputName = "Wedding.mp4"
         precondition(manual.outputNames == ["Wedding.mpg"])
+        try finish(manual,[first,second])
+        precondition(manual.savedVideos == [first,second], "Completion must retain actual saved files for Finder")
+        precondition(manual.detail.contains(first.path), "Completion must show the actual saved location")
+        precondition(manual.phase == "2 videos saved")
         manual.outputName = "../Wedding"
         precondition(!manual.validOutputName)
         print("Recovered-footage navigation checks passed.")

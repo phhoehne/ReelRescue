@@ -75,7 +75,8 @@ POST-PROCESSING
   Audio repair reduces clicks; it cannot restore missing speech or music.
   Frame holds repeat the last intact frame through a marked defect, at most
   two seconds. Use a full export to review these precisely timed repairs.
-• Open videos opens the destination. Play plays the first output.
+• Completion shows the saved location. Show in Finder selects the actual
+  output files. Play plays the first output.
 • Repair ranges refer to the combined video, or to each separate output.
 
 PROGRESS, STOPPING AND CHECKS
