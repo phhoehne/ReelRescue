@@ -180,6 +180,72 @@ class VideoTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             return r.export_video(self.source,folder,dict(preset="native",enhance=False,hardware=False,**options))
 
+    def test_mpeg_audio_timestamp_gap_is_not_squeezed_out(self):
+        folder=self.folder/"mpeg-audio-gap";folder.mkdir()
+        source=folder/"source.mpg"
+        subprocess.run([r.tool("ffmpeg"),"-v","error","-f","lavfi","-i","testsrc2=size=480x576:rate=25:duration=3",
+            "-f","lavfi","-i","sine=frequency=440:sample_rate=44100:duration=3","-af","aselect='not(between(t,1,1.2))'",
+            "-target","pal-svcd",str(source)],check=True)
+        original_audio=next(x for x in r.probe(source)["streams"] if x["codec_type"]=="audio")
+        with contextlib.redirect_stdout(io.StringIO()):
+            record=r.export_video(source,folder,dict(preset="native",enhance=False,hardware=False),prefix="Aligned")
+        output_audio=next(x for x in r.probe(record["file"])["streams"] if x["codec_type"]=="audio")
+        self.assertAlmostEqual(float(output_audio["duration"]),float(original_audio["duration"]),delta=.08)
+
+    def test_frame_hold_keeps_mpeg_picture_and_sound_start_aligned(self):
+        folder=self.folder/"mpeg-hold-offset";folder.mkdir()
+        for interlaced in (False,True):
+            with self.subTest(interlaced=interlaced):
+                source=folder/("source-"+str(interlaced)+".mpg")
+                cmd=[r.tool("ffmpeg"),"-v","error","-f","lavfi","-i","testsrc2=size=480x576:rate=25:duration=2",
+                    "-f","lavfi","-i","sine=frequency=440:sample_rate=44100:duration=2","-target","pal-svcd"]
+                if interlaced:cmd += ["-flags","+ildct+ilme","-top","1"]
+                subprocess.run(cmd+[str(source)],check=True)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    record=r.export_video(source,folder,dict(preset="native",enhance=False,hardware=False,hold_ranges="0.8-1.0"),prefix="Held-"+str(interlaced))
+                streams=r.probe(record["file"])["streams"]
+                video=next(x for x in streams if x["codec_type"]=="video")
+                audio=next(x for x in streams if x["codec_type"]=="audio")
+                self.assertLess(abs(float(video["start_time"])-float(audio["start_time"])),.05)
+                self.assertGreaterEqual(int(video["nb_frames"]),r.decoded_frames(source)*(2 if interlaced else 1)-1)
+
+    def test_overlapping_audio_timestamps_are_repaired_for_matroska(self):
+        folder=self.folder/"overlap-audio";folder.mkdir()
+        source=folder/"source.mkv"
+        subprocess.run([r.tool("ffmpeg"),"-v","error","-f","lavfi","-i","testsrc2=size=160x120:rate=25:duration=2",
+            "-f","lavfi","-i","sine=frequency=440:sample_rate=48000:duration=2",
+            "-af","asetpts='PTS-if(eq(N,10240),0.021/TB,0)'","-c:v","libx264","-c:a","pcm_s16le",str(source)],check=True)
+        original=r.sha(source)
+        with contextlib.redirect_stdout(io.StringIO()):
+            record=r.export_video(source,folder,dict(preset="native",container="mkv",codec="h264",resolution="source",enhance=False,hardware=False),prefix="Chosen audio name")
+        self.assertEqual(record["decode_errors"],0)
+        self.assertEqual(r.decoded_frames(record["file"]),50)
+        self.assertEqual(r.sha(source),original)
+        command=json.loads((folder/"Diagnostics/Chosen audio name_encode.command.json").read_text())
+        actual_filter=command[command.index("-af")+1]
+        def pcm_hash(filters):
+            cmd=[r.tool("ffmpeg"),"-v","error","-i",str(source),"-map","0:a:0"]
+            if filters:cmd += ["-af",filters]
+            return subprocess.check_output(cmd+["-c:a","pcm_s16le","-f","hash","-hash","sha256","-"],stderr=subprocess.DEVNULL)
+        self.assertEqual(pcm_hash(None),pcm_hash(actual_filter),"Audio-clock repair must retain every decoded sample")
+
+    def test_duplicate_picture_timestamps_are_repaired_without_dropping_frames(self):
+        folder=self.folder/"duplicate-timestamps";folder.mkdir()
+        source=folder/"source.mkv"
+        subprocess.run([r.tool("ffmpeg"),"-v","error","-f","lavfi","-i","testsrc2=size=160x120:rate=25:duration=2",
+            "-vf","settb=1/1000,setpts='if(eq(N,2),40,N*40)'","-fps_mode","passthrough","-enc_time_base:v","1:1000",
+            "-c:v","libx264","-bf","0",str(source)],check=True)
+        original=r.sha(source)
+        with contextlib.redirect_stdout(io.StringIO()):
+            record=r.export_video(source,folder,dict(preset="native",container="mkv",codec="h264",resolution="source",enhance=False,hardware=False),prefix="Chosen name")
+        self.assertEqual(r.decoded_frames(record["file"]),50)
+        self.assertEqual(record["decode_errors"],0)
+        frames=json.loads(subprocess.check_output([r.tool("ffprobe"),"-v","error","-select_streams","v:0","-show_frames",
+            "-show_entries","frame=best_effort_timestamp_time","-of","json",record["file"]]))["frames"]
+        times=[float(x["best_effort_timestamp_time"]) for x in frames]
+        self.assertTrue(all(a<b for a,b in zip(times,times[1:])))
+        self.assertEqual(r.sha(source),original)
+
     def test_valid_irregular_timestamps_are_not_reported_as_decode_errors(self):
         folder=self.folder/"precise-timestamps";folder.mkdir()
         source=folder/"source.mp4"
@@ -315,6 +381,19 @@ class VideoTests(unittest.TestCase):
         self.assertEqual(record["frames"],225)
         self.assertLess(abs(float(r.probe(record["file"])["format"]["duration"])-9),0.5)
         self.assertEqual([r.sha(path) for path in (first,second)],before)
+        destination=folder/"individual-output";destination.mkdir()
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            r.job(dict(mode="video",sources=[str(first)],destination=str(destination),output_name="Chosen filename",
+                preset="native",hardware=False,enhance=False))
+        saved=destination/"Chosen filename.mp4"
+        self.assertEqual({p.name for p in destination.iterdir()},{"Chosen filename.mp4"})
+        self.assertEqual(r.decoded_frames(saved),200)
+        self.assertLess(abs(float(r.probe(saved)["format"]["duration"])-8),.5)
+        record=json.loads(output.getvalue().splitlines()[-1])["report"]["outputs"][0]
+        self.assertTrue(record["timestamps_normalized"])
+        self.assertEqual(record["source_sha256"],before[0])
+        self.assertEqual([r.sha(path) for path in (first,second)],before)
+
 
     def test_native_geometry_chapters_audio_and_frame_count(self):
         result = self.export("native")

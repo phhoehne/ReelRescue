@@ -90,7 +90,7 @@ MPEG-2; VCD footage retains MPEG-1. Damage that could not be recovered may remai
 4. Choose the destination folder and click **Create video(s)**. Files are saved directly there, with no added subfolder. Existing files are never overwritten; change the name or destination to create another version.
 
 **Original MPEG · no conversion** keeps recovered MPEG picture and sound unchanged.
-Combining requires compatible MPEG tracks. Timestamp jumps are normalized in temporary
+Combining requires compatible MPEG tracks. Individual MPEG viewing copies and joins both normalize timestamps in temporary
 copies, with checks that compressed picture/audio payloads and decoded frame counts are
 preserved. Choose an H.264 or H.265 format to apply optional enhancement or repairs in
 the same job, including after combining. Combining other video formats is not supported.
@@ -186,6 +186,28 @@ Run the tests from the repository folder:
 ```sh
 python3 -m unittest discover -s tests -v
 ```
+
+For full-length acceptance testing with three compatible recovered MPEG tracks:
+
+```sh
+python3 scripts/test-output-name-editor.py /path/Track_01.mpg /path/Track_02.mpg /path/Track_03.mpg
+python3 scripts/test-real-footage.py --app "dist/Reel Rescue.app" --report build/acceptance/my-run --workers 2 --fail-fast /path/Track_01.mpg /path/Track_02.mpg /path/Track_03.mpg
+```
+
+The second command runs all 72 combinations of container, codec, resolution,
+separate/combined output and enhancement, plus unchanged-MPEG and targeted repair
+cases. It verifies actual saved names, source checksums, dimensions, codec,
+frame counts, audio/video start alignment and an independent full decode of every
+re-encoded video. It can take several hours. Generated duplicate videos are
+removed after successful checks; the report and failure diagnostics remain in
+the dedicated report directory. Original footage is never modified.
+
+After an interruption, repeat the same command with `--resume`. Completed cases
+are reused only when the engine, input hashes and scenario manifest match. Do
+not run two suites in the same report directory. The Name-editor test exercises
+the actual SwiftUI field while it retains focus, through to full-length files
+created by the bundled engine, in an off-screen test window.
+
 
 Tests cover checksum validation, sector merging, conflict reporting, device guards, cancellation, repair ranges, picture geometry, chapters, audio preservation, and HEVC output. They create synthetic fixtures and do not require personal footage.
 

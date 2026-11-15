@@ -2,6 +2,15 @@
 
 ## 1.1.0 — Unreleased
 
+- Correct overlapping decoded-audio timestamps before AAC encoding, preserving samples and forward gaps while preventing Matroska validation failures.
+
+- Repair duplicate or backward presentation timestamps before encoding, retaining every frame and preventing Matroska playback-validation failures.
+
+- Normalize individual recovered MPEG timelines before re-encoding, verify unchanged compressed data, and prevent false duration-change failures.
+- Validate decoded frame counts for interlaced viewing copies as well as progressive ones.
+
+- Keep frame-hold repairs on the normalized output timeline so MPEG start offsets do not discard the opening picture or delay it against audio.
+
 - Replace export presets with explicit container, codec and resolution controls, plus an approximate total output-size range.
 - Add numeric percentage and adaptive remaining-time estimates for joining, rendering and playback validation.
 

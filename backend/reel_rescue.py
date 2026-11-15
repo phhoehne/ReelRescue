@@ -612,13 +612,43 @@ def decoded_frames(path):
     return int(value) if value and value != "N/A" else None
 
 
-def export_video(source, folder, options, prefix="Film", recovering=False, preview=False):
+def prepare_mpeg(source, target, meta=None, phase="Preparing MPEG timestamps"):
+    """Repair container timestamps while verifying unchanged compressed content."""
+    source, target = Path(source), Path(target)
+    meta = meta or probe(source)
+    video = next(x for x in meta["streams"] if x["codec_type"] == "video")
+    audio = [x for x in meta["streams"] if x["codec_type"] == "audio"]
+    container = "vob" if video["codec_name"] == "mpeg2video" else "mpeg"
+    run([tool("ffmpeg"),"-nostdin","-hide_banner","-v","warning","-n",
+         "-fflags","+genpts","-dts_delta_threshold","10","-i",str(source),
+         "-map","0:v:0","-map","0:a?","-c","copy",
+         "-bsf:v","setts=pts='if(gt(abs(PTS-DTS),1/TB),DTS+DURATION,PTS)'","-f",container,
+         "-progress","pipe:1",str(target)],target.with_suffix(".log"),phase,float(meta["format"]["duration"]))
+    selectors = ["0:v:0"] + [f"0:a:{i}" for i in range(len(audio))]
+    for selector in selectors:
+        if stream_hash(source,selector) != stream_hash(target,selector):
+            raise RescueError("Preparing a video changed its compressed picture or sound data.")
+    return target
+
+
+def export_video(source, folder, options, prefix="Film", recovering=False, preview=False, prepared=False):
     diagnostics = Path(folder) / "Diagnostics"
     diagnostics.mkdir(exist_ok=True)
     source = Path(source).resolve(); meta = probe(source)
     video = next((s for s in meta["streams"] if s["codec_type"] == "video"), None)
     audio = next((s for s in meta["streams"] if s["codec_type"] == "audio"), None)
     if not video: raise RescueError("The selected file contains no video stream.")
+    if not prepared and video["codec_name"] in ("mpeg1video","mpeg2video") and meta["format"].get("format_name") == "mpeg":
+        # Raw recovery files can have both damaged timestamps and unreliable
+        # duration estimates. Use the same checked preparation for one track
+        # as for a join; validate against its repaired container timeline.
+        normalized = prepare_mpeg(source, folder / (prefix + "_prepared.mpg"), meta, "Preparing " + prefix)
+        record = export_video(normalized,folder,options,prefix,recovering,preview,prepared=True)
+        record["prepared_source_sha256"] = record["source_sha256"]
+        record.update(source=str(source),source_sha256=sha(source),timestamps_normalized=True)
+        dump(diagnostics / (prefix + "_validation.json"),record)
+        return record
+
     duration = float(meta["format"].get("duration",0))
     if not math.isfinite(duration) or duration <= 0: raise RescueError("The video duration cannot be determined safely.")
     click_ranges = ranges(options.get("audio_ranges", ""), duration)
@@ -651,9 +681,13 @@ def export_video(source, folder, options, prefix="Film", recovering=False, previ
     if interlaced: fps *= 2
     if holds:
         expression = "+".join(f"gte(t,{a})*lt(t,{b})" for a,b in holds)
-        filters += [f"select='not({expression})'",f"fps={fps}:start_time={video.get('start_time','0')}"]
+        filters += [f"select='not({expression})'",f"fps={fps}:start_time=0"]
     elif recovering:
         filters.append(f"fps={fps}")
+    # The output clock is milliseconds. Keep all frames, but repair equal or
+    # backward picture timestamps before encoding. Matroska otherwise retains
+    # duplicates that MP4/MOV muxers silently adjust, causing playback errors.
+    filters += ["settb=1/1000", "setpts='if(eq(N,0),PTS,max(PTS,PREV_OUTPTS+1))'"]
     final = folder / (prefix + ("_preview" if preview else "") + "." + container)
     partial = final.with_name(final.stem + ".partial." + container)
     start = timestamp(options.get("preview_start", "0")) if preview else 0
@@ -670,6 +704,13 @@ def export_video(source, folder, options, prefix="Film", recovering=False, previ
         else:
             af = []
             if recovering: af.append("aresample=async=1:first_pts=0")
+            # Keep every decoded sample and preserve forward gaps. Only move
+            # overlapping audio blocks to the preceding block's end. AAC needs
+            # a non-overlapping sample clock; Matroska does not hide collisions.
+            sample_rate = int(audio["sample_rate"])
+            af += [f"asettb=1/{sample_rate}",
+                   "asetpts='st(0,if(eq(N,0),PTS,max(PTS,ld(1))));st(1,ld(0)+NB_SAMPLES);ld(0)'"]
+
             if click_ranges:
                 expression = "+".join(f"between(t,{a},{b})" for a,b in click_ranges)
                 af += [f"adeclick=window=55:overlap=75:arorder=2:threshold=4:burst=2:method=save:enable='{expression}'",
@@ -695,7 +736,7 @@ def export_video(source, folder, options, prefix="Film", recovering=False, previ
         if hardware and any(t in text for t in ("Cannot create compression session", "hardware encoder may be busy")):
             if partial.exists(): partial.unlink()
             emit("warning",message="Hardware encoding is unavailable. Switching to the software encoder; this takes longer.")
-            return export_video(source,folder,dict(options,hardware=False),prefix,recovering,preview)
+            return export_video(source,folder,dict(options,hardware=False),prefix,recovering,preview,prepared=prepared)
         raise
     progress("Checking the finished video", None, "Checking playback, timing and audio")
     out = probe(partial); ov = next(s for s in out["streams"] if s["codec_type"] == "video")
@@ -705,10 +746,11 @@ def export_video(source, folder, options, prefix="Film", recovering=False, previ
     if not preview:
         drift = abs(float(out["format"]["duration"]) - duration)
         if drift > (max(2,duration*.002) if recovering else .15):
-            raise RescueError("The export's duration changed unexpectedly.")
-        if not interlaced and not recovering:
+            raise RescueError(f"The export's duration changed unexpectedly (expected {duration:.3f}s; got {float(out['format']['duration']):.3f}s).")
+        if not recovering and not holds:
             source_frames = decoded_frames(source)
-            if source_frames is not None and int(ov.get("nb_frames",0)) != source_frames:
+            expected_frames = source_frames * (2 if interlaced else 1) if source_frames is not None else None
+            if expected_frames is not None and int(ov.get("nb_frames",0)) != expected_frames:
                 raise RescueError("The export changed the decoded frame count unexpectedly.")
         if len(out.get("chapters",[])) != len(meta.get("chapters",[])):
             raise RescueError("The chapter count changed unexpectedly.")
@@ -788,17 +830,9 @@ def combine_tracks(sources, folder):
     normalized = []
     for index,(path,meta) in enumerate(zip(paths,metadata),1):
         target = folder / f"normalized_{index:02d}.mpg"
-        run([tool("ffmpeg"),"-nostdin","-hide_banner","-v","warning","-n",
-             "-fflags","+genpts","-dts_delta_threshold","10","-i",str(path),
-             "-map","0:v:0","-map","0:a?","-c","copy",
-             "-bsf:v","setts=pts='if(gt(abs(PTS-DTS),1/TB),DTS+DURATION,PTS)'","-f",container,
-             "-progress","pipe:1",str(target)],folder / f"prepare_{index:02d}.log",
-            f"Preparing track {index} of {len(paths)}",float(meta["format"]["duration"]))
+        prepare_mpeg(path,target,meta,f"Preparing track {index} of {len(paths)}")
         if signature(probe(target)) != signatures[0]:
             raise RescueError("Preparing a track changed its format unexpectedly.")
-        for selector in selectors:
-            if stream_hash(path,selector) != stream_hash(target,selector):
-                raise RescueError("Preparing a track changed its compressed picture or sound data.")
         normalized.append(target)
     durations = [float(probe(path)["format"]["duration"]) for path in normalized]
     listing = folder / "tracks.ffconcat"
@@ -883,8 +917,8 @@ def run_job(config, work):
     emit("project",path=str(p))
     report = dict(status="running",mode=mode,project=str(p),layout_version=4,outputs=[])
     dump(diagnostics / "report.json",report)
-    def export(source, options, prefix="Film", recovering=False, preview=False):
-        record = export_video(source,rendered,options,prefix=prefix,recovering=recovering,preview=preview)
+    def export(source, options, prefix="Film", recovering=False, preview=False, prepared=False):
+        record = export_video(source,rendered,options,prefix=prefix,recovering=recovering,preview=preview,prepared=prepared)
         staged = Path(record["file"])
         final = p / staged.name
         publish_video(staged,final)
@@ -906,7 +940,7 @@ def run_job(config, work):
                     publish_video(source, final)
                     record["file"] = str(final)
                 else:
-                    record = export(source, config, prefix=final.stem.removesuffix("_preview") if config.get("preview") else final.stem, preview=config.get("preview", False))
+                    record = export(source, config, prefix=final.stem.removesuffix("_preview") if config.get("preview") else final.stem, preview=config.get("preview", False), prepared=joined is not None)
                 report["outputs"].append(record)
         else:
             paths = list(config.get("sources",[])); info = None
