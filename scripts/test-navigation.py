@@ -21,7 +21,10 @@ import AppKit
             let report: [String: Any] = [originalsOnly ? "extracted" : "outputs": urls.map { ["file": $0.path] }]
             model.receive(try JSONSerialization.data(withJSONObject: ["type":"complete", "path":urls[0].path,"report":report]))
         }
-        let model = Model()
+        let suite = "ReelRescueNavigationTests-" + UUID().uuidString
+        let preferences = UserDefaults(suiteName: suite)!
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let model = Model(preferences: preferences)
         try finish(model,[first,second])
         model.selectedRecoveredVideo = second.path
         model.selectWorkflow(.video)
@@ -39,14 +42,28 @@ import AppKit
         try finish(model,[third],originalsOnly:true)
         model.selectWorkflow(.video)
         precondition(model.sources == [third], "A newer extraction must replace the old default, even without viewing copies")
-        let manual = Model()
+        model.add([first], replaceCatalog: true)
+        precondition(model.sources == [first], "Users can replace recovered footage")
+        precondition(model.latestRecoveredVideos == [third], "Remember the actual recovered footage")
+        model.useRecoveredVideos()
+        precondition(model.sources == [third], "Users can return to recovered footage")
+        let reopened = Model(preferences: preferences)
+        reopened.selectWorkflow(.video)
+        precondition(reopened.sources == [third], "Recovered footage must remain the default after reopening the app")
+        let handoff = Model(preferences: UserDefaults(suiteName: suite + "-handoff")!)
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite + "-handoff") }
+        try finish(handoff,[first,second])
+        handoff.reviewRecovered()
+        precondition(handoff.sources == [first,second], "The recovery result button must load all tracks")
+        let manual = Model(preferences: UserDefaults(suiteName: suite + "-manual")!)
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite + "-manual") }
         manual.selectWorkflow(.video)
         manual.add([second])
         manual.selectWorkflow(.recovery)
         manual.selectWorkflow(.video)
         precondition(manual.sources == [second], "Retain manual footage when no recovery has completed")
         manual.add([second,first], replaceCatalog: true)
-        precondition(manual.latestRecoveredVideos == [first,second], "Existing MPEG tracks must be selectable as a naturally ordered group")
+        precondition(manual.latestRecoveredVideos.isEmpty, "Choosing other videos must not overwrite the recovered-video catalog")
         precondition(manual.sources == [first,second])
         manual.outputName = "Wedding"
         precondition(manual.outputNames == ["Wedding_01.mp4", "Wedding_02.mp4"])

@@ -12,7 +12,9 @@ Recovery saves one original .mpg video per track. SVCDs retain MPEG-2 video;
 VCDs retain MPEG-1. Extraction does not convert the footage to MP4.
 There are no export-format or joining options in the recovery step.
 
-Enhance footage loads the latest recovered tracks automatically.
+Enhance footage loads the latest recovered tracks automatically, including after
+reopening the app. Choose videos replaces them; Use recovered videos returns
+to the last recovery. Only file locations are remembered in app preferences.
 1. Choose videos; remove unwanted tracks and use arrows to set their order.
 2. Choose Separate videos or One combined video.
 3. Enter a name and select a format. Exact output filenames appear below.

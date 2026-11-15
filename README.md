@@ -83,7 +83,7 @@ Recovery finishes with one `.mpg` video per authored track. There are no format,
 enhancement, or joining options in the extraction step. SVCD footage retains
 MPEG-2; VCD footage retains MPEG-1. Damage that could not be recovered may remain.
 
-1. Open **Enhance footage**. The latest recovered tracks are already selected, or choose your own videos.
+1. Open **Enhance footage**. The latest recovered tracks are already selected, including after reopening the app. **Choose videos…** replaces them with other footage; **Use recovered videos** returns to the last recovery.
 2. Check the list and use the arrows to set playback order. Remove unwanted tracks.
 3. Choose **Separate videos** or **One combined video**, enter a name, and choose a format. The exact filenames appear below the settings. Separate outputs use numbered names, such as `Wedding_01.mp4` and `Wedding_02.mp4`.
 4. Choose the destination folder and click **Create video(s)**. Files are saved directly there, with no added subfolder. Existing files are never overwritten; change the name or destination to create another version.

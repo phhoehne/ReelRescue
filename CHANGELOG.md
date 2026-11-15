@@ -2,6 +2,8 @@
 
 ## 1.1.0 — Unreleased
 
+- Default enhancement to all newly recovered tracks, remember their locations across app launches, and allow switching to other footage or back to the recovered videos.
+
 - Unify enhancement and joining into one workflow with ordered inputs, separate/combined output, explicit names, and one Create action.
 - Save post-processing videos directly in the chosen folder, with no generated subfolder and no overwriting.
 

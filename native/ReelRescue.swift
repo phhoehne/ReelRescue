@@ -73,6 +73,7 @@ final class Model: ObservableObject {
     @Published var refreshing = false
     @Published var showHelp = false
     @Published var showLog = false
+    private let preferences: UserDefaults
     var process: Process?
     var python: String?
     var bundledEngine: String { Bundle.main.resourceURL!.appendingPathComponent("runtime/engine/ReelRescueEngine").path }
@@ -83,8 +84,13 @@ final class Model: ObservableObject {
         ready && !busy && (workflow != .video || (validOutputName && !outputExists)) && (usesDrive ? !selectedDrive.isEmpty && tools["ddrescue"] != nil : !sources.isEmpty)
     }
 
-    init() {
+    init(preferences: UserDefaults = .standard) {
+        self.preferences = preferences
         let fm = FileManager.default
+        latestRecoveredVideos = (preferences.stringArray(forKey: "lastRecoveredVideoPaths") ?? [])
+            .map { URL(fileURLWithPath: $0) }.filter { fm.fileExists(atPath: $0.path) }
+        previousEnhancementSources = latestRecoveredVideos
+        latestRecoveredSelection = latestRecoveredVideos.first
         let candidates = [bundledEngine]
         python = candidates.first(where: fm.isExecutableFile(atPath:))
         if !fm.fileExists(atPath: destination.path) { destination = fm.homeDirectoryForCurrentUser.appendingPathComponent("Desktop") }
@@ -106,28 +112,22 @@ final class Model: ObservableObject {
             latestRecoveredSelection = recoveredVideos.first(where: { $0.path == selectedRecoveredVideo }) ?? recoveredVideos.first
         }
         if workflow == .video { previousEnhancementSources = sources }
-        let defaultVideo = video ?? previousEnhancementSources.first ?? latestRecoveredSelection
+        let available = previousEnhancementSources.filter { FileManager.default.fileExists(atPath: $0.path) }
+        let recovered = latestRecoveredVideos.filter { FileManager.default.fileExists(atPath: $0.path) }
+        let defaultVideos = video.map { [$0] } ?? (!available.isEmpty ? available : recovered)
         player?.pause(); player = nil; sources = []; cue = nil; result = nil
         audioRanges = ""; holdRanges = ""; error = ""; warning = ""; fraction = nil
         recoveryVerified = nil; recoveryUncertain = 0; recoveredVideos = []; selectedRecoveredVideo = ""
         workflow = next; phase = "Ready"
         detail = ""
-        if next == .video, let defaultVideo, FileManager.default.fileExists(atPath: defaultVideo.path) {
-            let available = latestRecoveredVideos.filter { FileManager.default.fileExists(atPath: $0.path) }
-            add(video != nil ? [defaultVideo] : !previousEnhancementSources.isEmpty ? previousEnhancementSources : !available.isEmpty ? available : [defaultVideo], preserveOrder: true)
-        }
+        if next == .video { add(defaultVideos, preserveOrder: true) }
         if next == .recovery { refreshDrives() }
     }
 
-    func selectRecoveredTrack(_ path: String) {
-        guard !busy, let url = latestRecoveredVideos.first(where: { $0.path == path }) else { return }
-        latestRecoveredSelection = url
-        add([url])
-    }
+    func reviewRecovered() { selectWorkflow(.video) }
 
-    func reviewRecovered() {
-        guard let url = recoveredVideos.first(where: { $0.path == selectedRecoveredVideo }) else { return }
-        selectWorkflow(.video, video: url)
+    func useRecoveredVideos() {
+        add(latestRecoveredVideos.filter { FileManager.default.fileExists(atPath: $0.path) }, preserveOrder: true)
     }
 
     func invoke(_ args: [String], completion: @escaping (Data) -> Void) {
@@ -194,10 +194,6 @@ final class Model: ObservableObject {
         guard !busy else { return }
         if workflow == .video {
             let selected = preserveOrder ? urls : urls.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
-            if replaceCatalog || selected.count > 1 {
-                latestRecoveredVideos = selected
-                latestRecoveredSelection = selected.first
-            }
             sources = selected
             previousEnhancementSources = selected
             if let first = selected.first { player = AVPlayer(url: first) }
@@ -294,6 +290,7 @@ final class Model: ObservableObject {
                 recoveredVideos = (copies.isEmpty ? originals : copies).compactMap { ($0["file"] as? String).map { URL(fileURLWithPath: $0) } }
                 selectedRecoveredVideo = recoveredVideos.first?.path ?? ""
                 latestRecoveredVideos = recoveredVideos
+                preferences.set(recoveredVideos.map(\.path), forKey: "lastRecoveredVideoPaths")
                 previousEnhancementSources = recoveredVideos
                 latestRecoveredSelection = recoveredVideos.first
                 detail = ""
@@ -402,10 +399,7 @@ struct ContentView: View {
             Text("Recovery results").font(.headline).foregroundStyle(ink)
             Text(m.recoveredVideos.count == 1 ? "1 video track saved" : "\(m.recoveredVideos.count) video tracks saved").font(.title3.weight(.semibold))
             if !m.recoveredVideos.isEmpty {
-                Picker("Track to review", selection: $m.selectedRecoveredVideo) {
-                    ForEach(m.recoveredVideos, id: \.path) { url in Text(url.lastPathComponent).tag(url.path) }
-                }
-                Button("Enhance this track", action: m.reviewRecovered)
+                Button("Enhance footage", action: m.reviewRecovered)
             }
         }.padding(18).frame(maxWidth: .infinity, alignment: .leading).background(mist, in: RoundedRectangle(cornerRadius: 10))
     }
@@ -451,7 +445,14 @@ struct ContentView: View {
     var sourceFiles: some View {
         VStack(alignment: .leading, spacing: 14) {
             if m.workflow == .video && !m.sources.isEmpty {
-                HStack { Text("Videos").font(.headline); Spacer(); Button("Choose videos…", action: m.chooseSource) }
+                HStack {
+                    Text("Videos").font(.headline)
+                    Spacer()
+                    if !m.latestRecoveredVideos.isEmpty && Set(m.sources) != Set(m.latestRecoveredVideos) {
+                        Button("Use recovered videos", action: m.useRecoveredVideos)
+                    }
+                    Button("Choose videos…", action: m.chooseSource)
+                }
                 ForEach(Array(m.sources.enumerated()), id: \.element) { index, url in
                     HStack {
                         Text("\(index + 1).").foregroundStyle(.secondary)
