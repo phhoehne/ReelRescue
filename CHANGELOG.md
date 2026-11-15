@@ -2,6 +2,9 @@
 
 ## 1.1.0 — Unreleased
 
+- Normalize damaged MPEG timestamps before joining and verify picture/audio payload preservation.
+- Allow selecting existing MPEG tracks for post-processing without another CD read.
+
 - Fix CD progress parsing when ddrescue includes an open-ended raw-device map tail.
 
 - Show a live CD-reading progress bar, percentage, bytes read and adaptive ETA.

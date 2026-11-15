@@ -166,17 +166,22 @@ final class Model: ObservableObject {
 
     func chooseSource() {
         let panel = NSOpenPanel()
-        panel.canChooseDirectories = false; panel.allowsMultipleSelection = workflow != .video
-        panel.message = workflow == .video ? "Choose an original or recovered video." : "Choose raw CD images from the same disc. Their extension may be .bin or .iso."
+        panel.canChooseDirectories = false; panel.allowsMultipleSelection = true
+        panel.message = workflow == .video ? "Choose videos to enhance, or MPEG tracks to combine." : "Choose raw CD images from the same disc. Their extension may be .bin or .iso."
         panel.prompt = "Choose"
         if workflow == .video { panel.allowedContentTypes = [.movie, .video, UTType(filenameExtension: "mkv") ?? .data, UTType(filenameExtension: "mpg") ?? .data] }
-        if panel.runModal() == .OK { add(panel.urls) }
+        if panel.runModal() == .OK { add(panel.urls, replaceCatalog: workflow == .video) }
     }
 
-    func add(_ urls: [URL]) {
+    func add(_ urls: [URL], replaceCatalog: Bool = false) {
         guard !busy else { return }
         if workflow == .video {
-            if let first = urls.first { sources = [first]; player = AVPlayer(url: first) }
+            let selected = urls.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+            if replaceCatalog || selected.count > 1 {
+                latestRecoveredVideos = selected
+                latestRecoveredSelection = selected.first
+            }
+            if let first = selected.first { sources = [first]; player = AVPlayer(url: first) }
         } else {
             for url in urls {
                 if url.pathExtension.lowercased() == "cue" { cue = url }
@@ -445,18 +450,29 @@ struct ContentView: View {
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: m.workflow == .video ? "film.stack" : "opticaldisc").font(.system(size: 32, weight: .light)).foregroundStyle(accent)
-                    Text(m.workflow == .video ? "Drop a video here" : m.usesDrive ? "Add earlier reads, if you have them" : "Drop images from the same CD here").font(.headline)
+                    Text(m.workflow == .video ? "Drop videos here" : m.usesDrive ? "Add earlier reads, if you have them" : "Drop images from the same CD here").font(.headline)
                     Text(m.workflow == .video ? "MP4, M4V, MPEG, MOV" : "Raw .bin or .iso")
                         .font(.callout).foregroundStyle(.secondary)
-                    Button(m.workflow == .video ? "Choose video…" : "Choose images…", action: m.chooseSource).controlSize(.large)
+                    Button(m.workflow == .video ? "Choose videos…" : "Choose images…", action: m.chooseSource).controlSize(.large)
                 }.frame(maxWidth: .infinity).padding(24)
                     .background(dropActive ? accent.opacity(0.12) : Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(accent.opacity(dropActive ? 0.8 : 0.22), style: StrokeStyle(lineWidth: 1, dash: [5,4])))
                     .onDrop(of: [UTType.fileURL.identifier], isTargeted: $dropActive) { providers in
+                        let workflow = m.workflow
+                        let group = DispatchGroup(), lock = NSLock()
+                        var urls: [URL] = []
                         for provider in providers {
+                            group.enter()
                             _ = provider.loadDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier) { data, _ in
-                                if let data, let url = URL(dataRepresentation: data, relativeTo: nil) { DispatchQueue.main.async { m.add([url]) } }
+                                if let data, let url = URL(dataRepresentation: data, relativeTo: nil) {
+                                    lock.lock(); urls.append(url); lock.unlock()
+                                }
+                                group.leave()
                             }
+                        }
+                        group.notify(queue: .main) {
+                            guard m.workflow == workflow else { return }
+                            m.add(urls, replaceCatalog: workflow == .video)
                         }
                         return true
                     }

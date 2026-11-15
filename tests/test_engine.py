@@ -213,6 +213,34 @@ class VideoTests(unittest.TestCase):
         self.assertEqual(audio_payload(record["file"]),b"".join(audio_payload(path) for path in sources))
         self.assertEqual(next(s for s in r.probe(record["file"])["streams"] if s["codec_type"]=="video")["codec_name"],"mpeg2video")
 
+    def test_combine_repairs_corrupt_pes_timestamps_without_changing_streams(self):
+        folder=self.folder/"corrupt-join";folder.mkdir()
+        first=folder/"first.mpg";second=folder/"second.mpg"
+        for path,length in [(first,8),(second,1)]:
+            subprocess.run([r.tool("ffmpeg"),"-v","error","-f","lavfi","-i",f"testsrc2=size=480x576:rate=25:duration={length}",
+                "-f","lavfi","-i",f"sine=frequency=440:duration={length}","-target","pal-svcd","-t",str(length),str(path)],check=True)
+        data=bytearray(first.read_bytes());positions=[];position=0
+        while True:
+            position=data.find(b"\0\0\1\xe0",position)
+            if position<0:break
+            if position+19<len(data) and data[position+7]&0xC0==0xC0:positions.append(position)
+            position+=4
+        self.assertTrue(positions)
+        position=positions[len(positions)//2]
+        # Change only the PES timestamps, leaving compressed video/audio intact.
+        for offset in (position+9,position+14):
+            b=data[offset:offset+5]
+            stamp=((b[0]>>1)&7)<<30 | (((b[1]<<8)|b[2])>>1)<<15 | (((b[3]<<8)|b[4])>>1)
+            stamp=(stamp+3600*90000)%(1<<33)
+            data[offset:offset+5]=bytes([(b[0]&0xF0)|(((stamp>>30)&7)<<1)|1,(stamp>>22)&255,((stamp>>15)&127)<<1|1,(stamp>>7)&255,(stamp&127)<<1|1])
+        first.write_bytes(data);before=[r.sha(path) for path in (first,second)]
+        with contextlib.redirect_stdout(io.StringIO()):record=r.combine_tracks([first,second],folder)
+        self.assertTrue(record["timestamps_normalized"])
+        self.assertTrue(record["payloads_identical"])
+        self.assertEqual(record["frames"],225)
+        self.assertLess(abs(float(r.probe(record["file"])["format"]["duration"])-9),0.5)
+        self.assertEqual([r.sha(path) for path in (first,second)],before)
+
     def test_native_geometry_chapters_audio_and_frame_count(self):
         result = self.export("native")
         self.assertEqual((result["width"],result["height"]),(768,576))

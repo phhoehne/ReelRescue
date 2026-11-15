@@ -45,6 +45,9 @@ import AppKit
         manual.selectWorkflow(.recovery)
         manual.selectWorkflow(.video)
         precondition(manual.sources == [second], "Retain manual footage when no recovery has completed")
+        manual.add([second,first], replaceCatalog: true)
+        precondition(manual.latestRecoveredVideos == [first,second], "Existing MPEG tracks must be selectable as a naturally ordered group")
+        precondition(manual.sources == [first])
         print("Recovered-footage navigation checks passed.")
     }
 }

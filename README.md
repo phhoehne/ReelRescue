@@ -86,8 +86,11 @@ MPEG-2; VCD footage retains MPEG-1. Damage that could not be recovered may remai
 
 Open **Enhance footage** to work on the latest recovered track. When there are
 multiple tracks, **Combine recovered tracks** joins them in disc order into
-`Combined.mpg` without re-encoding. Tracks must have matching picture and sound
-formats; incompatible tracks are left separate. Picture/sound improvements and
+`Combined.mpg` without re-encoding. You can also choose or drop multiple existing MPEG tracks; filenames determine
+their natural order. Corrupt timestamp jumps are normalized in temporary copies,
+with checks that compressed picture/audio payloads and decoded frame counts are
+preserved. Tracks must have matching picture and sound formats; incompatible
+tracks are left separate. Picture/sound improvements and
 H.264/H.265 viewing copies are separate post-processing actions.
 
 ## Saved files

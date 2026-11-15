@@ -715,26 +715,59 @@ def combine_tracks(sources, folder):
     signatures = [signature(meta) for meta in metadata]
     if any(value != signatures[0] for value in signatures[1:]):
         raise RescueError("These tracks use different picture or sound formats and cannot be joined without conversion.")
-    durations = [float(meta["format"]["duration"]) for meta in metadata]
+    selectors = ["0:v:0"] + [f"0:a:{i}" for i in range(len(signatures[0][1]))]
+    container = "vob" if signatures[0][0][0] == "mpeg2video" else "mpeg"
+    normalized = []
+    for index,(path,meta) in enumerate(zip(paths,metadata),1):
+        target = folder / f"normalized_{index:02d}.mpg"
+        run([tool("ffmpeg"),"-nostdin","-hide_banner","-v","warning","-n",
+             "-fflags","+genpts","-dts_delta_threshold","10","-i",str(path),
+             "-map","0:v:0","-map","0:a?","-c","copy","-f",container,
+             "-progress","pipe:1",str(target)],folder / f"prepare_{index:02d}.log",
+            f"Preparing track {index} of {len(paths)}",float(meta["format"]["duration"]))
+        if signature(probe(target)) != signatures[0]:
+            raise RescueError("Preparing a track changed its format unexpectedly.")
+        for selector in selectors:
+            if stream_hash(path,selector) != stream_hash(target,selector):
+                raise RescueError("Preparing a track changed its compressed picture or sound data.")
+        normalized.append(target)
+    durations = [float(probe(path)["format"]["duration"]) for path in normalized]
     listing = folder / "tracks.ffconcat"
     lines = ["ffconcat version 1.0"]
-    for path, duration in zip(paths,durations):
+    for path, duration in zip(normalized,durations):
         if "\n" in str(path) or "\r" in str(path): raise RescueError("Track filenames cannot contain newlines.")
         quoted = str(path).replace("'", "'\\''")
         lines += ["file '" + quoted + "'", "duration " + str(duration)]
     listing.write_text("\n".join(lines) + "\n")
     final = folder / "Combined.mpg"
     run([tool("ffmpeg"),"-nostdin","-hide_banner","-v","warning","-n","-f","concat","-safe","0", "-i",str(listing),
-         "-map","0:v:0","-map","0:a?","-c","copy","-f","mpeg","-progress","pipe:1",str(final)],
+         "-map","0:v:0","-map","0:a?","-c","copy","-f",container,"-progress","pipe:1",str(final)],
         folder / "combine.log", "Combining tracks", sum(durations))
     result = probe(final)
     if signature(result) != signatures[0]: raise RescueError("The combined video's format changed unexpectedly.")
     if abs(float(result["format"]["duration"]) - sum(durations)) > max(0.5, sum(durations)*0.002):
         raise RescueError("The combined video's timing changed unexpectedly.")
+    progress("Checking combined video")
+    for selector in selectors:
+        expected_hash = subprocess.check_output([tool("ffmpeg"),"-nostdin","-v","error","-f","concat","-safe","0",
+            "-i",str(listing),"-map",selector,"-c","copy","-f","hash","-hash","sha256","-"],stderr=subprocess.DEVNULL).decode().strip()
+        if expected_hash != stream_hash(final,selector):
+            raise RescueError("The combined video changed compressed picture or sound data.")
     counts = [decoded_frames(path) for path in paths]
+    video = next(stream for stream in result["streams"] if stream["codec_type"] == "video")
+    try:
+        numerator,denominator = map(int,video["r_frame_rate"].split("/"))
+        fps = numerator/denominator
+    except (KeyError,ValueError,ZeroDivisionError):
+        raise RescueError("The combined video's frame timing cannot be verified.")
+    if all(count is not None for count in counts) and fps>0:
+        frame_duration = sum(counts)/fps
+        if abs(float(result["format"]["duration"])-frame_duration)>max(2,frame_duration*0.01):
+            raise RescueError("The combined video still contains an unsafe timestamp discontinuity.")
     if all(count is not None for count in counts) and decoded_frames(final) != sum(counts):
         raise RescueError("The combined video's frame count changed unexpectedly.")
-    return dict(file=str(final),sha256=sha(final),stream_copy=True,combined_tracks=len(paths))
+    return dict(file=str(final),sha256=sha(final),stream_copy=True,combined_tracks=len(paths),
+                timestamps_normalized=True,payloads_identical=True,frames=decoded_frames(final))
 
 
 def job(config):

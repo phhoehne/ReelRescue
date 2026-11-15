@@ -14,6 +14,9 @@ There are no export-format or joining options in the recovery step.
 
 Enhance footage automatically loads the latest recovered track. Combine
 recovered tracks joins compatible tracks into Combined.mpg without re-encoding.
+Choose or drop multiple existing MPEG files to combine them without another
+CD read. Filenames determine track order. Timestamp jumps are corrected in
+temporary copies; compressed picture/sound payloads and frame counts are checked.
 Picture and sound improvements or H.264/H.265 copies are separate actions.
 
 RECOVER AN INSERTED CD
