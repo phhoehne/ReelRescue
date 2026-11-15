@@ -2,6 +2,9 @@
 
 ## 1.1.0 — Unreleased
 
+- Replace export presets with explicit container, codec and resolution controls, plus an approximate total output-size range.
+- Add numeric percentage and adaptive remaining-time estimates for joining, rendering and playback validation.
+
 - Preserve MP4 timestamp precision during playback validation so valid combined H.264/H.265 videos are saved instead of falsely rejected as decoding errors.
 
 - Show the actual saved output path on completion and select the created video files with Show in Finder.

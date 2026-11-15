@@ -77,6 +77,14 @@ import AppKit
         precondition(manual.savedVideos == [first,second], "Completion must retain actual saved files for Finder")
         precondition(manual.detail.contains(first.path), "Completion must show the actual saved location")
         precondition(manual.phase == "2 videos saved")
+        manual.container = "mkv"
+        manual.codec = "hevc"
+        manual.resolution = "720"
+        precondition(manual.outputNames == ["Wedding.mkv"])
+        manual.sourceInformation = Dictionary(uniqueKeysWithValues: manual.sources.map { ($0.path,["width":768,"height":576,"fps":50.0,"duration":300.0,"size":100000000] as [String:Any]) })
+        precondition(manual.sourceResolution == "768 × 576")
+        precondition(manual.sizeEstimate.contains("total"))
+        precondition(manual.sizeEstimate.contains("varies"))
         manual.outputName = "../Wedding"
         precondition(!manual.validOutputName)
         print("Recovered-footage navigation checks passed.")

@@ -32,6 +32,19 @@ def sector(lba, fill=42, form2=True):
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_media_progress_percentage_and_rolling_eta(self):
+        now=[0.0]
+        tracker=r.MediaProgress("Rendering",100,clock=lambda:now[0])
+        with patch.object(r,"emit") as emit:
+            now[0]=1;tracker(5)
+            self.assertIsNone(emit.call_args.kwargs["eta_seconds"])
+            now[0]=4;tracker(20)
+            self.assertAlmostEqual(emit.call_args.kwargs["fraction"],.2)
+            self.assertAlmostEqual(emit.call_args.kwargs["eta_seconds"],16)
+            self.assertIn("16s remaining in this step",emit.call_args.kwargs["detail"])
+            now[0]=20;tracker(60)
+            self.assertGreater(emit.call_args.kwargs["eta_seconds"],0)
+
     def test_cancellation_stops_child_process(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d); child_pid = p/"child.pid"
@@ -178,6 +191,23 @@ class VideoTests(unittest.TestCase):
         self.assertTrue(Path(record["file"]).is_file())
         self.assertEqual(record["decode_errors"],0)
         self.assertEqual(r.decoded_frames(record["file"]),r.decoded_frames(source))
+
+    def test_explicit_container_codec_resolution_and_source_information(self):
+        info=r.inspect_sources([str(self.source)])["videos"][0]
+        self.assertEqual((info["width"],info["height"]),(768,576))
+        self.assertAlmostEqual(info["duration"],4,delta=.1)
+        for container,codec,resolution,dimensions in [("mp4","h264","720",(1280,720)),("mov","hevc","source",(768,576)),("mkv","h264","source",(768,576))]:
+            with self.subTest(container=container,codec=codec,resolution=resolution):
+                folder=self.folder/("explicit-"+container);folder.mkdir()
+                with contextlib.redirect_stdout(io.StringIO()):
+                    r.job(dict(mode="video",sources=[str(self.source)],destination=str(folder),output_name="Wedding",
+                        preset="native",container=container,codec=codec,resolution=resolution,enhance=False,hardware=False))
+                output=folder/("Wedding."+container)
+                self.assertTrue(output.is_file())
+                video=next(s for s in r.probe(output)["streams"] if s["codec_type"]=="video")
+                self.assertEqual(video["codec_name"],codec)
+                self.assertEqual((video["width"],video["height"]),dimensions)
+                self.assertEqual(r.decoded_frames(output),100)
 
     def test_job_publishes_only_video_and_discards_temporary_files(self):
         parent=self.folder/"scratch";parent.mkdir()

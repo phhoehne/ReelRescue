@@ -29,8 +29,9 @@ These tools are available in **Enhance footage** after recovery:
 - Deinterlacing for sources marked as interlaced.
 - Audio click reduction in manually selected time ranges.
 - Short, manually selected holds of the last intact frame to cover a damaged moment.
-- H.264 viewing copies at the original display size or 1080p.
-- Smaller 1080p H.265/HEVC copies, with hardware encoding when available.
+- MP4, QuickTime MOV or Matroska MKV containers, with H.264 or H.265/HEVC video.
+- Source display size, 720p (1280 × 720) or 1080p (1920 × 1080), with proportions preserved.
+- An approximate total-size range before creation, plus percentage and an adaptive ETA for each processing step.
 
 The app preserves the picture’s proportions when upscaling. It uses no generative face reconstruction, beauty filters, or invented voices. Enhancement is off by default. AAC audio is copied without re-encoding when compatible and no audio repair is requested; full exports using that path verify the copied audio against the source.
 
@@ -85,7 +86,7 @@ MPEG-2; VCD footage retains MPEG-1. Damage that could not be recovered may remai
 
 1. Open **Enhance footage**. The latest recovered tracks are already selected, including after reopening the app. **Choose videos…** replaces them with other footage; **Use recovered videos** returns to the last recovery.
 2. Check the list and use the arrows to set playback order. Remove unwanted tracks.
-3. Choose **Separate videos** or **One combined video**, enter a name, and choose a format. The exact filenames appear below the settings. Separate outputs use numbered names, such as `Wedding_01.mp4` and `Wedding_02.mp4`.
+3. Choose **Separate videos** or **One combined video**, enter a name, then choose the container, codec and resolution. The exact filenames appear below the settings. Separate outputs use numbered names, such as `Wedding_01.mp4` and `Wedding_02.mp4`.
 4. Choose the destination folder and click **Create video(s)**. Files are saved directly there, with no added subfolder. Existing files are never overwritten; change the name or destination to create another version.
 
 **Original MPEG · no conversion** keeps recovered MPEG picture and sound unchanged.
@@ -94,6 +95,22 @@ copies, with checks that compressed picture/audio payloads and decoded frame cou
 preserved. Choose an H.264 or H.265 format to apply optional enhancement or repairs in
 the same job, including after combining. Combining other video formats is not supported.
 Repair ranges refer to the resulting combined video, or to each separate output.
+Size estimates use source duration, output dimensions, frame rate and codec. They
+are approximate ranges, not file-size limits: quality-based encoding varies with
+noise, movement and footage complexity. Upscaling may produce a file larger than
+the recovered MPEG. Original MPEG estimates use the input file sizes.
+
+MP4 and MOV use the `hvc1` tag for HEVC compatibility; MKV uses its native HEVC
+mapping. MP4/MOV support fast start. AAC audio is encoded at 256 kb/s when needed;
+existing AAC is copied when no audio repair is applied. Source-size exports use
+square pixels, so an anamorphic 480 × 576 track may become 768 × 576 without
+changing its displayed proportions. Original MPEG retains its stored dimensions.
+
+Rendering, joining and playback validation each show their own percentage and
+estimated time remaining. The ETA is measured from recent throughput; it appears
+after processing starts and can vary with damaged sections. Unmeasured checks
+show an activity indicator rather than an invented ETA.
+
 The source videos are never renamed or changed. Completion shows the saved path. **Show in Finder** selects the created files; **Play** opens the first video.
 
 ## Saved files

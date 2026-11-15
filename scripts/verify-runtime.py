@@ -50,6 +50,15 @@ def main():
             project=Path(item['file']).parent
             assert {x.name for x in project.iterdir()}=={'Film.mp4'}
             assert all(p.suffix=='.mp4' for p in project.iterdir())
+        inspection=root/'inspect.json';inspection.write_text(json.dumps(dict(sources=[str(root/'input.mp4')])))
+        metadata=json.loads(run(engine,'inspect',inspection).stdout)['videos'][0]
+        assert (metadata['width'],metadata['height'])==(768,576)
+        for container in ('mov','mkv'):
+            exported=job(dict(mode='video',sources=[str(root/'input.mp4')],preset='native',container=container,
+                codec='h264',resolution='720',enhance=False,hardware=False))['outputs'][0]
+            assert Path(exported['file']).suffix=='.'+container
+            assert (exported['width'],exported['height'])==(1280,720)
+            assert exported['decode_errors']==0
         # Create a raw Mode 2 image using generated MPEG payload, then recover it.
         run(ffmpeg,'-v','error','-f','lavfi','-i','testsrc2=size=480x576:rate=25:duration=1',
             '-target','pal-svcd',root/'fixture.mpg')
@@ -84,7 +93,7 @@ def main():
         run('codesign','--verify','--deep','--strict',moved)
         print(json.dumps(dict(relocated_bundle=True,external_tool_paths_removed=True,
             invalid_python_environment_ignored=True,native_repair_export='passed',hevc_1080p_export='passed',
-            aac_audio_preserved=True,raw_image_recovery='original MPEG only',combine_without_reencoding='passed',bundled_ddrescue='passed',
+            explicit_mov_mkv_720p='passed',source_metadata_inspection='passed',aac_audio_preserved=True,raw_image_recovery='original MPEG only',combine_without_reencoding='passed',bundled_ddrescue='passed',
             missing_tool_no_host_fallback=True,code_signature='verified',detected_cd_count=len(devices['discs'])),indent=2))
 
 

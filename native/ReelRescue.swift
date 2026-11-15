@@ -28,14 +28,70 @@ final class Model: ObservableObject {
     @Published var sources: [URL] = []
     @Published var cue: URL?
     @Published var destination = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first!
-    @Published var preset = "native"
+    @Published var container = "mp4"
+    @Published var codec = "h264"
+    @Published var resolution = "source"
+    @Published var sourceInformation: [String: [String: Any]] = [:]
+    var preset: String {
+        get { container == "mpeg" ? "original" : codec == "hevc" ? "share" : resolution == "source" ? "native" : "hd" }
+        set {
+            container = newValue == "original" ? "mpeg" : "mp4"
+            codec = newValue == "share" ? "hevc" : "h264"
+            resolution = ["share", "hd"].contains(newValue) ? "1080" : "source"
+        }
+    }
+    var sourceResolution: String {
+        let sizes = Set(sources.compactMap { url -> String? in
+            guard let info = sourceInformation[url.path], let width = info["width"] as? Int, let height = info["height"] as? Int else { return nil }
+            return "\(width) × \(height)"
+        })
+        return sizes.count == 1 ? sizes.first! : sizes.isEmpty ? "Source size" : "Varies by video"
+    }
+    var sizeEstimate: String {
+        guard !sources.isEmpty else { return "—" }
+        let entries = sources.compactMap { sourceInformation[$0.path] }
+        guard entries.count == sources.count, entries.allSatisfy({ $0["duration"] as? Double != nil }) else { return "Unavailable until video information is read" }
+        let formatter = ByteCountFormatter(); formatter.countStyle = .file
+        if container == "mpeg" {
+            let total = entries.reduce(Int64(0)) { $0 + (($1["size"] as? NSNumber)?.int64Value ?? 0) }
+            return "Approx. " + formatter.string(fromByteCount: total) + " total"
+        }
+        var bytes = 0.0
+        for info in entries {
+            let duration = info["duration"] as? Double ?? 0
+            let width = resolution == "1080" ? 1920 : resolution == "720" ? 1280 : info["width"] as? Int ?? 640
+            let height = resolution == "1080" ? 1080 : resolution == "720" ? 720 : info["height"] as? Int ?? 480
+            let fps = min(120, max(1, info["fps"] as? Double ?? 25))
+            let bitrate = max(500_000, Double(width * height) * fps * (codec == "hevc" ? 0.06 : 0.13))
+            bytes += duration * (bitrate + 256_000) / 8 * 1.02
+        }
+        guard bytes.isFinite, bytes > 0, bytes < Double(Int64.max)/2 else { return "Unavailable" }
+        return "~" + formatter.string(fromByteCount: Int64(bytes * 0.5)) + "–" + formatter.string(fromByteCount: Int64(bytes * 1.6)) + " total · varies with footage"
+    }
+
+    func inspectSelection() {
+        guard workflow == .video, !sources.isEmpty, python != nil else { sourceInformation = [:]; return }
+        let paths = sources.map(\.path)
+        let request = FileManager.default.temporaryDirectory.appendingPathComponent("reel-inspect-\(UUID().uuidString).json")
+        do { try JSONSerialization.data(withJSONObject: ["sources": paths]).write(to: request) }
+        catch { return }
+        invoke(["inspect", request.path]) { data in
+            try? FileManager.default.removeItem(at: request)
+            guard self.sources.map(\.path) == paths,
+                let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let videos = result["videos"] as? [[String: Any]] else { return }
+            self.sourceInformation = Dictionary(videos.compactMap { entry in
+                (entry["path"] as? String).map { ($0, entry) }
+            }, uniquingKeysWith: { first, _ in first })
+        }
+    }
     @Published var combineOutput = false
     @Published var outputName = "Recovered film"
     private var previousEnhancementSources: [URL] = []
-    var outputExtension: String { preset == "original" ? "mpg" : "mp4" }
+    var outputExtension: String { container == "mpeg" ? "mpg" : container }
     var outputBaseName: String {
         let name = outputName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return ["mp4", "mpg", "mpeg"].contains((name as NSString).pathExtension.lowercased()) ? (name as NSString).deletingPathExtension : name
+        return ["mp4", "mov", "mkv", "mpg", "mpeg"].contains((name as NSString).pathExtension.lowercased()) ? (name as NSString).deletingPathExtension : name
     }
     var outputNames: [String] {
         let name = outputBaseName
@@ -226,7 +282,7 @@ final class Model: ObservableObject {
         error = ""; warning = ""; log = ""; fraction = nil; project = nil; result = nil; savedVideos = []
         recoveryVerified = nil; recoveryUncertain = 0; recoveredVideos = []; selectedRecoveredVideo = ""
         var settings: [String: Any] = ["mode": jobMode, "sources": sources.map(\.path), "combine": combineOutput, "output_name": outputName, "destination": destination.path,
-                                      "preset": preset, "enhance": enhance,
+                                      "preset": preset, "container": container == "mpeg" ? "mp4" : container, "codec": codec, "resolution": resolution, "enhance": enhance,
                                       "audio_ranges": audioRanges, "hold_ranges": holdRanges, "preview_start": previewStart,
                                       "preview": preview, "hardware": true]
         if let cue { settings["cue"] = cue.path }
@@ -364,6 +420,8 @@ struct ContentView: View {
         .onReceive(driveRefresh) { _ in
             if m.usesDrive { m.refreshDrives() }
         }
+        .onAppear { m.inspectSelection() }
+        .onChange(of: m.sources) { _, _ in m.inspectSelection() }
         .onChange(of: m.recoverySource) { _, _ in m.changeRecoverySource() }
         .sheet(isPresented: $m.showHelp) { help }
         .sheet(isPresented: $m.showLog) {
@@ -550,12 +608,32 @@ struct ContentView: View {
 
     var exportOptions: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Picker("Format", selection: $m.preset) {
-                Text("Original MPEG · no conversion").tag("original")
-                Text("Original display size · H.264").tag("native")
-                Text("1080p compact copy · H.265").tag("share")
-                Text("1080p high-quality copy · H.264").tag("hd")
+            Picker("Container", selection: $m.container) {
+                Text("MP4 (.mp4)").tag("mp4")
+                Text("QuickTime (.mov)").tag("mov")
+                Text("Matroska (.mkv)").tag("mkv")
+                Text("Original MPEG (.mpg) · no conversion").tag("mpeg")
             }.pickerStyle(.menu)
+            if m.container != "mpeg" {
+                Picker("Video codec", selection: $m.codec) {
+                    Text("H.264").tag("h264")
+                    Text("H.265 (HEVC)").tag("hevc")
+                }.pickerStyle(.menu)
+                Picker("Resolution", selection: $m.resolution) {
+                    Text("Source display size · \(m.sourceResolution)").tag("source")
+                    Text("720p · 1280 × 720").tag("720")
+                    Text("1080p · 1920 × 1080").tag("1080")
+                }.pickerStyle(.menu)
+                Text("Audio: AAC · 256 kb/s when re-encoded; existing AAC is retained without audio repairs.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("Original picture, resolution and sound · no re-encoding").font(.caption).foregroundStyle(.secondary)
+            }
+            HStack(alignment: .top) {
+                Text("Estimated size").font(.callout)
+                Spacer()
+                Text(m.sizeEstimate).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+            }
             if m.preset != "original" { Toggle("Gentle noise reduction and sharpening", isOn: $m.enhance) }
         }
     }
@@ -601,7 +679,12 @@ struct ContentView: View {
                     Text(m.phase).font(.headline)
                     if !m.detail.isEmpty { Text(m.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle).textSelection(.enabled).help(m.detail) }
                     if m.busy {
-                        if let f = m.fraction { ProgressView(value: f).frame(maxWidth: 340) }
+                        if let f = m.fraction {
+                            HStack {
+                                ProgressView(value: f)
+                                Text(f.formatted(.percent.precision(.fractionLength(0)))).monospacedDigit().font(.caption)
+                            }.frame(maxWidth: 340)
+                        }
                         else { ProgressView().controlSize(.small) }
                     }
                 }

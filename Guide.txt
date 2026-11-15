@@ -17,7 +17,7 @@ reopening the app. Choose videos replaces them; Use recovered videos returns
 to the last recovery. Only file locations are remembered in app preferences.
 1. Choose videos; remove unwanted tracks and use arrows to set their order.
 2. Choose Separate videos or One combined video.
-3. Enter a name and select a format. Exact output filenames appear below.
+3. Enter a name, choose container, codec and resolution. Exact filenames appear below.
 4. Choose the destination and click Create video(s).
 Videos save directly in that folder, without a new subfolder. Separate videos
 use numbered names. Existing files are never overwritten. Source videos are
@@ -62,10 +62,16 @@ viewing copy in Enhance footage.
 
 POST-PROCESSING
 • Choose videos or drop them into the empty video area.
-• Original display size: H.264 with correct square-pixel geometry.
-• 1080p high quality: H.264, Apple hardware quality 85.
-• 1080p compact copy: H.265/HEVC, Apple hardware quality 65 and hvc1 compatibility.
-• 1080p fits the full image inside 1920×1080 without stretching or cropping.
+• Container: MP4, QuickTime MOV, Matroska MKV, or unchanged original MPEG.
+• Video codec: H.264 or H.265 (HEVC) for MP4/MOV/MKV.
+• Resolution: source display size, 720p (1280×720) or 1080p (1920×1080).
+  The full image fits without stretching or cropping. Source display size uses
+  square pixels; original MPEG keeps its authored dimensions and pixel aspect.
+• Size: an approximate total range based on duration, dimensions, frame rate
+  and codec. Quality-based encoding varies with noise and movement; this is
+  not a size cap. Upscaled files can be larger than the source MPEG.
+• Audio: AAC at 256 kb/s when re-encoded; existing AAC is copied without
+  audio repair. Original MPEG retains original audio.
 • Interlaced sources identified by their metadata are deinterlaced to fields.
 • Gentle enhancement applies light noise reduction and restrained sharpening.
   It is optional and OFF by default. No face reconstruction, beautification,
@@ -80,6 +86,10 @@ POST-PROCESSING
 • Repair ranges refer to the combined video, or to each separate output.
 
 PROGRESS, STOPPING AND CHECKS
+Each measured step shows percentage and an adaptive ETA based on recent speed.
+The estimate applies to the named step (joining, rendering or playback validation).
+Unmeasured checks show an activity indicator. Rendering 100% is followed by
+playback validation; a result is saved only after validation passes.
 Stop terminates processing and removes temporary work. Already saved videos remain.
 Completed video files are published only after decoding and basic timing,
 dimension, frame-count and audio checks. Passing these checks means the file

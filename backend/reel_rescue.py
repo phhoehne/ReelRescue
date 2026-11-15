@@ -87,11 +87,56 @@ def sha(path):
     return h.hexdigest()
 
 
+class MediaProgress:
+    """A per-step estimate from recent media throughput, independent of codec."""
+    def __init__(self, phase, duration, clock=time.monotonic):
+        self.phase, self.duration, self.clock = phase, duration, clock
+        self.samples = collections.deque([(clock(), 0.0)])
+
+    def __call__(self, seconds):
+        now = self.clock()
+        self.samples.append((now, max(0, seconds)))
+        while len(self.samples) > 2 and self.samples[1][0] < now - 15:
+            self.samples.popleft()
+        elapsed = now - self.samples[0][0]
+        rate = (seconds - self.samples[0][1]) / elapsed if elapsed > 0 else 0
+        eta = max(0, (self.duration-seconds)/rate) if self.duration and elapsed >= 2 and rate > 0 else None
+        if eta is None:
+            detail = "Estimating time remaining in this step"
+        else:
+            remaining = max(1, math.ceil(eta))
+            text = f"{remaining//3600}h {(remaining%3600)//60}m" if remaining >= 3600 else f"{remaining//60}m {remaining%60}s" if remaining >= 60 else f"{remaining}s"
+            detail = "Est. " + text + " remaining in this step"
+        emit("progress", phase=self.phase, fraction=min(.999,max(0,seconds/self.duration)) if self.duration else None,
+             detail=detail, eta_seconds=eta)
+
+
+def inspect_sources(paths):
+    entries = []
+    for source in paths:
+        try:
+            path = Path(source).resolve(); meta = probe(path)
+            video = next(s for s in meta["streams"] if s["codec_type"] == "video")
+            sar = video.get("sample_aspect_ratio", "1:1").split(":")
+            ratio = int(sar[0])/int(sar[1]) if len(sar)==2 and int(sar[1]) else 1
+            numerator, denominator = map(int,video.get("r_frame_rate","25/1").split("/"))
+            fps = numerator/denominator if denominator else 25
+            if video.get("field_order") in ("tt","bb","tb","bt"): fps *= 2
+            entries.append(dict(path=str(Path(source)),duration=float(meta["format"]["duration"]),
+                width=int(video["width"]*ratio//2*2),height=video["height"],
+                fps=fps,size=path.stat().st_size))
+        except (OSError,ValueError,KeyError,StopIteration,RescueError):
+            entries.append(dict(path=str(source),error="Could not read video information"))
+    return dict(videos=entries)
+
+
 def run(cmd, log, phase, duration=None, read_progress=None):
     """Run only an argument array, never shell text; cancel the entire child group."""
     global ACTIVE
     dump(Path(log).with_suffix(".command.json"), cmd)
     last = 0
+    media_progress = MediaProgress(phase, duration)
+    if read_progress is None: progress(phase, 0 if duration else None, "Estimating time remaining in this step")
     with open(log, "w") as err:
         try:
             ACTIVE = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err,
@@ -113,10 +158,10 @@ def run(cmd, log, phase, duration=None, read_progress=None):
                         except ValueError:
                             continue
                         if time.monotonic() - last > .4:
-                            progress(phase, min(.999, seconds / duration) if duration else None,
-                                     f"{seconds / 60:.1f} minutes processed")
+                            media_progress(seconds)
                             last = time.monotonic()
             code = ACTIVE.wait()
+            if not code and read_progress is None: progress(phase, 1, "Step finished")
             if code:
                 tail = Path(log).read_text(errors="replace")[-1800:]
                 raise RescueError(f"{phase} failed (exit {code}). {tail}")
@@ -581,16 +626,22 @@ def export_video(source, folder, options, prefix="Film", recovering=False, previ
     if holds and preview: raise RescueError("Preview frame holds with a full export so absolute timing is preserved. Clear holds to make a short picture/audio preview.")
     preset = options.get("preset", "share")
     if preset not in ("native","hd","share"): raise RescueError("Unknown export preset.")
+    codec = options.get("codec", "hevc" if preset == "share" else "h264")
+    resolution = options.get("resolution", "1080" if preset in ("hd","share") else "source")
+    container = options.get("container", "mp4")
+    if codec not in ("h264","hevc") or resolution not in ("source","720","1080") or container not in ("mp4","mov","mkv"):
+        raise RescueError("Unsupported output container, codec or resolution.")
     filters = []
     interlaced = video.get("field_order") in ("tt","bb","tb","bt")
     if interlaced:
         filters.append("bwdif=mode=send_field:parity=auto:deint=all")
     if options.get("enhance", True):
         filters += ["hqdn3d=0.6:0.8:1.2:1.6","unsharp=5:5:0.5:5:5:0"]
-    if preset in ("hd", "share"):
-        # DAR (not stored width) governs geometry for anamorphic PAL/NTSC sources.
-        filters += ["scale=w='if(gte(dar,16/9),1920,trunc(1080*dar/2)*2)':h='if(gte(dar,16/9),trunc(1920/dar/2)*2,1080)':flags=bicubic+accurate_rnd",
-                    "setsar=1","pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black"]
+    if resolution != "source":
+        width,height = (1920,1080) if resolution == "1080" else (1280,720)
+        # Fit the original display proportions into the selected frame, without cropping.
+        filters += [f"scale=w='if(gte(dar,16/9),{width},trunc({height}*dar/2)*2)':h='if(gte(dar,16/9),trunc({width}/dar/2)*2,{height})':flags=bicubic+accurate_rnd",
+                    "setsar=1",f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=black"]
     else:
         filters += ["scale=w='trunc(ih*dar/2)*2':h=ih:flags=lanczos","setsar=1"]
     try:
@@ -603,8 +654,8 @@ def export_video(source, folder, options, prefix="Film", recovering=False, previ
         filters += [f"select='not({expression})'",f"fps={fps}:start_time={video.get('start_time','0')}"]
     elif recovering:
         filters.append(f"fps={fps}")
-    final = folder / (prefix + ("_preview" if preview else "") + ".mp4")
-    partial = final.with_name(final.stem + ".partial.mp4")
+    final = folder / (prefix + ("_preview" if preview else "") + "." + container)
+    partial = final.with_name(final.stem + ".partial." + container)
     start = timestamp(options.get("preview_start", "0")) if preview else 0
     if preview and (start >= duration or click_ranges):
         if click_ranges: raise RescueError("Clear audio ranges for a short picture preview; audio repair uses absolute times in a full export.")
@@ -625,15 +676,17 @@ def export_video(source, folder, options, prefix="Film", recovering=False, previ
                        "alimiter=limit=0.97:attack=5:release=50:level=false:latency=true"]
             if af: cmd += ["-af",",".join(af)]
             cmd += ["-c:a","aac","-b:a","256k"]
-    hardware = preset != "native" and options.get("hardware", True)
-    if preset == "share":
+    hardware = (resolution != "source" or codec == "hevc") and options.get("hardware", True)
+    if codec == "hevc":
         enc = ["-c:v","hevc_videotoolbox","-q:v","65","-profile:v","main","-allow_sw","0","-prio_speed","false"] if hardware else ["-c:v","libx265","-preset","fast","-crf","22","-x265-params","pools=4:frame-threads=2:log-level=error"]
-        enc += ["-tag:v","hvc1"]
+        if container in ("mp4", "mov"): enc += ["-tag:v","hvc1"]
     elif hardware:
         enc = ["-c:v","h264_videotoolbox","-q:v","85","-profile:v","high","-allow_sw","0","-prio_speed","false"]
     else:
         enc = ["-c:v","libx264","-preset","fast","-crf","17","-threads","4"]
-    tail = ["-pix_fmt","yuv420p","-fps_mode","passthrough","-enc_time_base:v","1:1000","-video_track_timescale","1000","-movie_timescale","1000","-movflags","+faststart","-progress","pipe:1",str(partial)]
+    tail = ["-pix_fmt","yuv420p","-fps_mode","passthrough","-enc_time_base:v","1:1000"]
+    if container in ("mp4", "mov"): tail += ["-video_track_timescale","1000","-movie_timescale","1000","-movflags","+faststart"]
+    tail += ["-progress","pipe:1",str(partial)]
     log = diagnostics / (prefix + "_encode.log")
     try:
         run(cmd + enc + tail, log, "Rendering " + prefix, min(10,duration-start) if preview else duration)
@@ -646,6 +699,9 @@ def export_video(source, folder, options, prefix="Film", recovering=False, previ
         raise
     progress("Checking the finished video", None, "Checking playback, timing and audio")
     out = probe(partial); ov = next(s for s in out["streams"] if s["codec_type"] == "video")
+    if ov.get("nb_frames") in (None, "N/A"):
+        count = decoded_frames(partial)
+        if count is not None: ov["nb_frames"] = str(count)
     if not preview:
         drift = abs(float(out["format"]["duration"]) - duration)
         if drift > (max(2,duration*.002) if recovering else .15):
@@ -656,7 +712,7 @@ def export_video(source, folder, options, prefix="Film", recovering=False, previ
                 raise RescueError("The export changed the decoded frame count unexpectedly.")
         if len(out.get("chapters",[])) != len(meta.get("chapters",[])):
             raise RescueError("The chapter count changed unexpectedly.")
-    if preset in ("hd","share") and (ov["width"],ov["height"]) != (1920,1080): raise RescueError("Unexpected output size.")
+    if resolution != "source" and (ov["width"],ov["height"]) != ((1920,1080) if resolution == "1080" else (1280,720)): raise RescueError("Unexpected output size.")
     audio_same = None
     if audio_copy and not preview:
         audio_same = stream_hash(source,"0:a:0") == stream_hash(partial,"0:a:0")
@@ -668,7 +724,7 @@ def export_video(source, folder, options, prefix="Film", recovering=False, previ
     if (diagnostics / (prefix + "_decode.log")).read_text().strip():
         raise RescueError("The exported video reported decoding errors.")
     partial.rename(final)
-    record = dict(file=str(final),source=str(source),preset=preset,preview=preview,
+    record = dict(file=str(final),source=str(source),preset=preset,codec=codec,container=container,resolution=resolution,preview=preview,
                   duration=out["format"]["duration"],width=ov["width"],height=ov["height"],
                   frames=ov.get("nb_frames"),audio_bitstream_identical=audio_same,
                   audio_ranges=click_ranges,hold_ranges=holds,hardware_encoder=hardware,
@@ -797,14 +853,16 @@ def video_plan(config):
     combine = config.get("combine", False) or config.get("mode") == "combine"
     original = config.get("preset") == "original" or config.get("mode") == "combine"
     name = config.get("output_name", "Combined" if config.get("mode") == "combine" else "Film").strip()
-    if Path(name).suffix.lower() in (".mp4", ".mpg", ".mpeg"): name = str(Path(name).with_suffix(""))
+    if Path(name).suffix.lower() in (".mp4", ".mov", ".mkv", ".mpg", ".mpeg"): name = str(Path(name).with_suffix(""))
     if not name or name in (".", "..") or any(c in name for c in ("/", "\\", ":", "\0")):
         raise RescueError("Enter a video name without slashes or colons.")
     if len(name.encode("utf-8")) > 200: raise RescueError("Choose a shorter video name.")
     if original and any(next((s.get("codec_name") for s in probe(x)["streams"] if s.get("codec_type") == "video"), None) not in ("mpeg1video", "mpeg2video") or probe(x)["format"].get("format_name") != "mpeg" for x in sources):
         raise RescueError("Original MPEG requires MPEG video tracks. Choose an MP4 format for other videos.")
     count = 1 if combine else len(sources)
-    suffix = ".mpg" if original else ".mp4"
+    container = config.get("container", "mp4")
+    if not original and container not in ("mp4","mov","mkv"): raise RescueError("Unsupported output container.")
+    suffix = ".mpg" if original else "." + container
     targets = [root / (name + (f"_{i+1:02d}" if count > 1 else "") + ("_preview" if config.get("preview") else "") + suffix) for i in range(count)]
     if any(x.exists() or x.is_symlink() for x in targets):
         raise RescueError("A video with this name already exists. Change the name or choose another folder.")
@@ -894,13 +952,14 @@ def run_job(config, work):
 
 def main():
     signal.signal(signal.SIGTERM,cancel); signal.signal(signal.SIGINT,cancel)
-    parser = argparse.ArgumentParser(); parser.add_argument("command",choices=["doctor","discs","devices","job"]); parser.add_argument("path",nargs="?")
+    parser = argparse.ArgumentParser(); parser.add_argument("command",choices=["doctor","discs","devices","inspect","job"]); parser.add_argument("path",nargs="?")
     args = parser.parse_args()
     try:
         if args.command == "doctor": print(json.dumps(doctor()),flush=True)
         elif args.command == "discs": print(json.dumps(discs()),flush=True)
         elif args.command == "devices": print(json.dumps(disc_inventory()),flush=True)
         elif not args.path: raise RescueError("A job settings file is required.")
+        elif args.command == "inspect": print(json.dumps(inspect_sources(json.loads(Path(args.path).read_text())["sources"])),flush=True)
         else: job(json.loads(Path(args.path).read_text()))
     except Cancelled:
         emit("cancelled",message="Stopped. Temporary working files were removed."); return 130
