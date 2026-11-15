@@ -2,6 +2,8 @@
 
 ## 1.1.0 — Unreleased
 
+- Repair presentation-only MPEG timestamp jumps when decode timestamps remain valid.
+
 - Normalize damaged MPEG timestamps before joining and verify picture/audio payload preservation.
 - Allow selecting existing MPEG tracks for post-processing without another CD read.
 

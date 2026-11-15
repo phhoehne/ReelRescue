@@ -722,7 +722,8 @@ def combine_tracks(sources, folder):
         target = folder / f"normalized_{index:02d}.mpg"
         run([tool("ffmpeg"),"-nostdin","-hide_banner","-v","warning","-n",
              "-fflags","+genpts","-dts_delta_threshold","10","-i",str(path),
-             "-map","0:v:0","-map","0:a?","-c","copy","-f",container,
+             "-map","0:v:0","-map","0:a?","-c","copy",
+             "-bsf:v","setts=pts='if(gt(abs(PTS-DTS),1/TB),DTS+DURATION,PTS)'","-f",container,
              "-progress","pipe:1",str(target)],folder / f"prepare_{index:02d}.log",
             f"Preparing track {index} of {len(paths)}",float(meta["format"]["duration"]))
         if signature(probe(target)) != signatures[0]:
@@ -746,7 +747,7 @@ def combine_tracks(sources, folder):
     result = probe(final)
     if signature(result) != signatures[0]: raise RescueError("The combined video's format changed unexpectedly.")
     if abs(float(result["format"]["duration"]) - sum(durations)) > max(0.5, sum(durations)*0.002):
-        raise RescueError("The combined video's timing changed unexpectedly.")
+        raise RescueError(f"The combined video's timing changed unexpectedly (expected {sum(durations):.1f}s; got {float(result['format']['duration']):.1f}s).")
     progress("Checking combined video")
     for selector in selectors:
         expected_hash = subprocess.check_output([tool("ffmpeg"),"-nostdin","-v","error","-f","concat","-safe","0",

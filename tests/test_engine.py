@@ -228,7 +228,9 @@ class VideoTests(unittest.TestCase):
         self.assertTrue(positions)
         position=positions[len(positions)//2]
         # Change only the PES timestamps, leaving compressed video/audio intact.
-        for offset in (position+9,position+14):
+        # Include the second failure mode: PTS jumps while DTS stays valid.
+        pts_only=positions[len(positions)//3]
+        for offset in (position+9,position+14,pts_only+9):
             b=data[offset:offset+5]
             stamp=((b[0]>>1)&7)<<30 | (((b[1]<<8)|b[2])>>1)<<15 | (((b[3]<<8)|b[4])>>1)
             stamp=(stamp+3600*90000)%(1<<33)
