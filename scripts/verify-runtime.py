@@ -28,7 +28,8 @@ def main():
         def run(*args):
             return subprocess.run(list(map(str,args)),env=env,text=True,capture_output=True,check=True)
         def job(settings):
-            request = root/'job.json';request.write_text(json.dumps(dict(destination=str(root),**settings)))
+            destination = root/('output-'+str(len(list(root.glob('output-*')))));destination.mkdir()
+            request = root/'job.json';request.write_text(json.dumps(dict(destination=str(destination),**settings)))
             result=run(engine,'job',request)
             events=[json.loads(line) for line in result.stdout.splitlines()]
             assert events[-1]['type']=='complete',events[-1]

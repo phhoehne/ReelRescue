@@ -4,20 +4,27 @@ GET STARTED
 Open dist/Reel Rescue.app. The app opens on a single recovery screen with CD drive and Local files choices.
 Insert a damaged Video CD or Super Video CD and refresh the drive list.
 If you already have raw reads, select “Local files” on the recovery screen. Select your
-sources and a folder, then click Start recovery. Every run creates a new
-project and opens originals read-only. Everything runs locally.
+sources and a folder, then click Start recovery. Recovery creates a new
+output folder and opens originals read-only. Everything runs locally.
 
 RECOVER FIRST, THEN ENHANCE
 Recovery saves one original .mpg video per track. SVCDs retain MPEG-2 video;
 VCDs retain MPEG-1. Extraction does not convert the footage to MP4.
 There are no export-format or joining options in the recovery step.
 
-Enhance footage automatically loads the latest recovered track. Combine
-recovered tracks joins compatible tracks into Combined.mpg without re-encoding.
-Choose or drop multiple existing MPEG files to combine them without another
-CD read. Filenames determine track order. Timestamp jumps are corrected in
-temporary copies; compressed picture/sound payloads and frame counts are checked.
-Picture and sound improvements or H.264/H.265 copies are separate actions.
+Enhance footage loads the latest recovered tracks automatically.
+1. Choose videos; remove unwanted tracks and use arrows to set their order.
+2. Choose Separate videos or One combined video.
+3. Enter a name and select a format. Exact output filenames appear below.
+4. Choose the destination and click Create video(s).
+Videos save directly in that folder, without a new subfolder. Separate videos
+use numbered names. Existing files are never overwritten. Source videos are
+never renamed or changed. Change the name or destination for another version.
+
+Original MPEG keeps MPEG picture and sound unchanged. Combining requires
+compatible MPEG tracks; timestamps are normalized in temporary copies and
+compressed picture/audio payloads and frame counts are verified. Select an
+MP4 format for optional enhancement or repairs within the same job.
 
 RECOVER AN INSERTED CD
 Reading the CD shows live progress and an estimated time remaining. The
@@ -52,7 +59,7 @@ temporary working files and are removed when the run ends. To inspect or enhance
 viewing copy in Enhance footage.
 
 POST-PROCESSING
-• Drop a video in the window, or use Choose video / Command-O.
+• Choose videos or drop them into the empty video area.
 • Original display size: H.264 with correct square-pixel geometry.
 • 1080p high quality: H.264, Apple hardware quality 85.
 • 1080p compact copy: H.265/HEVC, Apple hardware quality 65 and hvc1 compatibility.
@@ -61,13 +68,13 @@ POST-PROCESSING
 • Gentle enhancement applies light noise reduction and restrained sharpening.
   It is optional and OFF by default. No face reconstruction, beautification,
   generated detail or invented voices are used. Normal filtering and lossy
-  compression still change pixels; compare a preview before a long export.
-• Preview 10 seconds tests picture settings at the chosen start time.
+  compression still change pixels.
 • Repair specific moments accepts ranges such as 01:23.4-01:24.0, one per line.
   Audio repair reduces clicks; it cannot restore missing speech or music.
   Frame holds repeat the last intact frame through a marked defect, at most
   two seconds. Use a full export to review these precisely timed repairs.
-• Play copy plays the output. New copy returns to the controls.
+• Open videos opens the destination. Play plays the first output.
+• Repair ranges refer to the combined video, or to each separate output.
 
 PROGRESS, STOPPING AND CHECKS
 Stop terminates processing and removes temporary work. Already saved videos remain.

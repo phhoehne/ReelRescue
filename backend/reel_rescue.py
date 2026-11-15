@@ -693,7 +693,17 @@ def publish_video(source, destination):
             owned = True
             shutil.copyfileobj(src, out, length=8 * 1024 * 1024)
         if sha(partial) != sha(source): raise RescueError("The saved video copy failed its checksum check.")
-        partial.replace(destination)
+        # Exclusive rename also works on external filesystems without hard links.
+        if sys.platform == "darwin":
+            rename = ctypes.CDLL(None, use_errno=True).renamex_np
+            rename.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+            rename.restype = ctypes.c_int
+            if rename(os.fsencode(partial), os.fsencode(destination), 0x00000004):  # RENAME_EXCL
+                error = ctypes.get_errno()
+                raise OSError(error, os.strerror(error), str(destination))
+        else:
+            os.link(partial, destination)
+            partial.unlink()
     except BaseException:
         if owned and partial.exists(): partial.unlink()
         raise
@@ -777,11 +787,34 @@ def job(config):
         return run_job(config, Path(temporary))
 
 
+def video_plan(config):
+    root = Path(config["destination"]).expanduser().resolve()
+    if not root.is_dir(): raise RescueError("Choose an existing output folder.")
+    sources = [Path(x).expanduser().resolve() for x in config.get("sources", [])]
+    if not sources or any(not x.is_file() for x in sources): raise RescueError("Choose existing video files.")
+    combine = config.get("combine", False) or config.get("mode") == "combine"
+    original = config.get("preset") == "original" or config.get("mode") == "combine"
+    name = config.get("output_name", "Combined" if config.get("mode") == "combine" else "Film").strip()
+    if Path(name).suffix.lower() in (".mp4", ".mpg", ".mpeg"): name = str(Path(name).with_suffix(""))
+    if not name or name in (".", "..") or any(c in name for c in ("/", "\\", ":", "\0")):
+        raise RescueError("Enter a video name without slashes or colons.")
+    if len(name.encode("utf-8")) > 200: raise RescueError("Choose a shorter video name.")
+    if original and any(next((s.get("codec_name") for s in probe(x)["streams"] if s.get("codec_type") == "video"), None) not in ("mpeg1video", "mpeg2video") or probe(x)["format"].get("format_name") != "mpeg" for x in sources):
+        raise RescueError("Original MPEG requires MPEG video tracks. Choose an MP4 format for other videos.")
+    count = 1 if combine else len(sources)
+    suffix = ".mpg" if original else ".mp4"
+    targets = [root / (name + (f"_{i+1:02d}" if count > 1 else "") + ("_preview" if config.get("preview") else "") + suffix) for i in range(count)]
+    if any(x.exists() or x.is_symlink() for x in targets):
+        raise RescueError("A video with this name already exists. Change the name or choose another folder.")
+    return root, sources, combine, original, targets
+
+
 def run_job(config, work):
     mode = config.get("mode")
     if mode not in ("video","images","disc","combine"): raise RescueError("Unknown task.")
     tool("ffmpeg"); tool("ffprobe")
-    p = project(config["destination"])
+    plan = video_plan(config) if mode in ("video", "combine") else None
+    p = plan[0] if plan else project(config["destination"])
     diagnostics = work / "Diagnostics"; diagnostics.mkdir()
     data = work / "Recovery data"
     rendered = work / "Rendered"; rendered.mkdir()
@@ -800,16 +833,21 @@ def run_job(config, work):
         staged.unlink()
         return record
     try:
-        if mode == "video":
-            sources = config.get("sources",[])
-            if len(sources) != 1: raise RescueError("Choose one video at a time.")
-            report["outputs"] = [export(sources[0],config,prefix="Film",preview=config.get("preview",False))]
-        elif mode == "combine":
-            record = combine_tracks(config.get("sources",[]),rendered)
-            final = p / "Combined.mpg"
-            publish_video(record["file"],final)
-            record["file"] = str(final)
-            report["outputs"] = [record]
+        if plan:
+            _, sources, combine, original, targets = plan
+            if combine and len(sources) > 1:
+                joined = combine_tracks(sources, rendered)
+                sources = [Path(joined["file"])]
+            else:
+                joined = None
+            for source, final in zip(sources, targets):
+                if original:
+                    record = dict(joined) if joined else dict(sha256=sha(source), original_stream=True)
+                    publish_video(source, final)
+                    record["file"] = str(final)
+                else:
+                    record = export(source, config, prefix=final.stem.removesuffix("_preview") if config.get("preview") else final.stem, preview=config.get("preview", False))
+                report["outputs"].append(record)
         else:
             paths = list(config.get("sources",[])); info = None
             if mode == "disc":

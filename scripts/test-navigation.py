@@ -25,16 +25,16 @@ import AppKit
         try finish(model,[first,second])
         model.selectedRecoveredVideo = second.path
         model.selectWorkflow(.video)
-        precondition(model.sources == [second], "Enhancement must default to the selected recovered track")
+        precondition(model.sources == [first,second], "Enhancement must load the recovered tracks in order")
         precondition(model.latestRecoveredVideos == [first,second], "Track list must survive navigation")
         model.audioRanges = "1-2"
         model.selectWorkflow(.video)
         precondition(model.audioRanges == "1-2", "Clicking the active menu must preserve edits")
-        model.selectRecoveredTrack(first.path)
-        precondition(model.sources == [first])
+        model.sources.swapAt(0, 1)
+        precondition(model.sources == [second,first])
         model.selectWorkflow(.recovery)
         model.selectWorkflow(.video)
-        precondition(model.sources == [first], "Recovered track choice must survive leaving the page")
+        precondition(model.sources == [second,first], "Chosen track order must survive leaving the page")
         model.selectWorkflow(.recovery)
         try finish(model,[third],originalsOnly:true)
         model.selectWorkflow(.video)
@@ -47,7 +47,17 @@ import AppKit
         precondition(manual.sources == [second], "Retain manual footage when no recovery has completed")
         manual.add([second,first], replaceCatalog: true)
         precondition(manual.latestRecoveredVideos == [first,second], "Existing MPEG tracks must be selectable as a naturally ordered group")
-        precondition(manual.sources == [first])
+        precondition(manual.sources == [first,second])
+        manual.outputName = "Wedding"
+        precondition(manual.outputNames == ["Wedding_01.mp4", "Wedding_02.mp4"])
+        manual.combineOutput = true
+        precondition(manual.outputNames == ["Wedding.mp4"])
+        manual.preset = "original"
+        precondition(manual.outputNames == ["Wedding.mpg"])
+        manual.outputName = "Wedding.mp4"
+        precondition(manual.outputNames == ["Wedding.mpg"])
+        manual.outputName = "../Wedding"
+        precondition(!manual.validOutputName)
         print("Recovered-footage navigation checks passed.")
     }
 }

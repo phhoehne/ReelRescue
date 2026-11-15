@@ -169,14 +169,45 @@ class VideoTests(unittest.TestCase):
 
     def test_job_publishes_only_video_and_discards_temporary_files(self):
         parent=self.folder/"scratch";parent.mkdir()
+        (self.folder/"output").mkdir()
         with patch.object(r.tempfile,"tempdir",str(parent)), contextlib.redirect_stdout(io.StringIO()) as output:
-            r.job(dict(mode="video",sources=[str(self.source)],destination=str(self.folder),preset="native",enhance=False,hardware=False))
+            r.job(dict(mode="video",sources=[str(self.source)],destination=str(self.folder/"output"),preset="native",enhance=False,hardware=False))
         event=json.loads(output.getvalue().splitlines()[-1]);p=Path(event["project"])
+        self.assertEqual(p, (self.folder/"output").resolve())
         self.assertEqual({x.name for x in p.iterdir()},{"Film.mp4"})
         self.assertEqual(list(parent.iterdir()),[])
         self.assertNotIn("details",event)
         self.assertEqual(event["report"]["layout_version"],4)
         self.assertTrue(event["report"]["outputs"][0]["audio_bitstream_identical"])
+
+    def test_postprocessing_naming_preflight_and_multiple_outputs(self):
+        destination=self.folder/"named";destination.mkdir()
+        settings=dict(mode="video",sources=[str(self.source),str(self.source)],destination=str(destination),output_name="Wedding",preset="native",enhance=False,hardware=False)
+        with contextlib.redirect_stdout(io.StringIO()): r.job(settings)
+        self.assertEqual({x.name for x in destination.iterdir()},{"Wedding_01.mp4","Wedding_02.mp4"})
+        with patch.object(r,"export_video") as export:
+            with self.assertRaises(r.RescueError): r.job(settings)
+            export.assert_not_called()
+        settings.update(sources=[str(self.source)], output_name="Wedding_preview.mp4")
+        with contextlib.redirect_stdout(io.StringIO()): r.job(settings)
+        self.assertTrue((destination/"Wedding_preview.mp4").is_file())
+        self.assertFalse((destination/"Wedding.mp4").exists())
+        for name in ("../escape", "a/b", "a:b", "", ".."):
+            with self.assertRaises(r.RescueError): r.video_plan(dict(settings,output_name=name))
+
+    def test_combine_and_enhance_is_one_job(self):
+        folder=self.folder/"joined-job";folder.mkdir()
+        first=folder/"first.mpg"
+        subprocess.run([r.tool("ffmpeg"),"-v","error","-f","lavfi","-i","testsrc2=size=480x576:rate=25:duration=1","-target","pal-svcd",str(first)],check=True)
+        destination=folder/"output";destination.mkdir()
+        settings=dict(mode="video",sources=[str(first),str(first)],combine=True,destination=str(destination),output_name="Wedding",preset="native",enhance=False,hardware=False)
+        with contextlib.redirect_stdout(io.StringIO()): r.job(settings)
+        self.assertEqual({x.name for x in destination.iterdir()},{"Wedding.mp4"})
+        self.assertAlmostEqual(float(r.probe(destination/"Wedding.mp4")["format"]["duration"]),2,delta=.2)
+        settings.update(preset="original",output_name="Original wedding")
+        with contextlib.redirect_stdout(io.StringIO()): r.job(settings)
+        self.assertEqual({x.name for x in destination.iterdir()},{"Wedding.mp4","Original wedding.mpg"})
+        self.assertEqual(r.decoded_frames(destination/"Original wedding.mpg"),50)
 
     def test_failed_recovery_discards_working_files_and_preserves_source(self):
         source=self.folder/"bad-image.bin";source.write_bytes(b"unreadable source")

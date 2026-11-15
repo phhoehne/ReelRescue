@@ -2,6 +2,9 @@
 
 ## 1.1.0 — Unreleased
 
+- Unify enhancement and joining into one workflow with ordered inputs, separate/combined output, explicit names, and one Create action.
+- Save post-processing videos directly in the chosen folder, with no generated subfolder and no overwriting.
+
 - Repair presentation-only MPEG timestamp jumps when decode timestamps remain valid.
 
 - Normalize damaged MPEG timestamps before joining and verify picture/audio payload preservation.

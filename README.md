@@ -18,7 +18,7 @@ It reads recorded CDs, compares saved raw reads of the same disc, and saves the 
 - **Report remaining damage:** the app flags uncertain recovery data while processing.
 - **Keep recovery separate from enhancement:** recovery outputs one original `.mpg` file per video track.
 
-Original disc media and source files are opened read-only. Each run saves its videos in a new output folder. Processing stays on your Mac, with no accounts or uploads.
+Original disc media and source files are opened read-only. Recovery groups tracks in a new output folder. Enhancement saves videos directly in the folder you choose. Processing stays on your Mac, with no accounts or uploads.
 
 ## Optional footage enhancement
 
@@ -31,7 +31,6 @@ These tools are available in **Enhance footage** after recovery:
 - Short, manually selected holds of the last intact frame to cover a damaged moment.
 - H.264 viewing copies at the original display size or 1080p.
 - Smaller 1080p H.265/HEVC copies, with hardware encoding when available.
-- A 10-second picture preview before committing to a longer export.
 
 The app preserves the picture’s proportions when upscaling. It uses no generative face reconstruction, beauty filters, or invented voices. Enhancement is off by default. AAC audio is copied without re-encoding when compatible and no audio repair is requested; full exports using that path verify the copied audio against the source.
 
@@ -84,14 +83,18 @@ Recovery finishes with one `.mpg` video per authored track. There are no format,
 enhancement, or joining options in the extraction step. SVCD footage retains
 MPEG-2; VCD footage retains MPEG-1. Damage that could not be recovered may remain.
 
-Open **Enhance footage** to work on the latest recovered track. When there are
-multiple tracks, **Combine recovered tracks** joins them in disc order into
-`Combined.mpg` without re-encoding. You can also choose or drop multiple existing MPEG tracks; filenames determine
-their natural order. Corrupt timestamp jumps are normalized in temporary copies,
-with checks that compressed picture/audio payloads and decoded frame counts are
-preserved. Tracks must have matching picture and sound formats; incompatible
-tracks are left separate. Picture/sound improvements and
-H.264/H.265 viewing copies are separate post-processing actions.
+1. Open **Enhance footage**. The latest recovered tracks are already selected, or choose your own videos.
+2. Check the list and use the arrows to set playback order. Remove unwanted tracks.
+3. Choose **Separate videos** or **One combined video**, enter a name, and choose a format. The exact filenames appear below the settings. Separate outputs use numbered names, such as `Wedding_01.mp4` and `Wedding_02.mp4`.
+4. Choose the destination folder and click **Create video(s)**. Files are saved directly there, with no added subfolder. Existing files are never overwritten; change the name or destination to create another version.
+
+**Original MPEG · no conversion** keeps recovered MPEG picture and sound unchanged.
+Combining requires compatible MPEG tracks. Timestamp jumps are normalized in temporary
+copies, with checks that compressed picture/audio payloads and decoded frame counts are
+preserved. Choose an H.264 or H.265 format to apply optional enhancement or repairs in
+the same job, including after combining. Combining other video formats is not supported.
+Repair ranges refer to the resulting combined video, or to each separate output.
+The source videos are never renamed or changed. Use **Open videos** or **Play** when finished.
 
 ## Saved files
 

@@ -29,6 +29,23 @@ final class Model: ObservableObject {
     @Published var cue: URL?
     @Published var destination = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first!
     @Published var preset = "native"
+    @Published var combineOutput = false
+    @Published var outputName = "Recovered film"
+    private var previousEnhancementSources: [URL] = []
+    var outputExtension: String { preset == "original" ? "mpg" : "mp4" }
+    var outputBaseName: String {
+        let name = outputName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ["mp4", "mpg", "mpeg"].contains((name as NSString).pathExtension.lowercased()) ? (name as NSString).deletingPathExtension : name
+    }
+    var outputNames: [String] {
+        let name = outputBaseName
+        return (combineOutput || sources.count <= 1) ? ["\(name).\(outputExtension)"] : sources.indices.map { String(format: "%@_%02d.%@", name, $0 + 1, outputExtension) }
+    }
+    var outputExists: Bool { outputNames.contains { FileManager.default.fileExists(atPath: destination.appendingPathComponent($0).path) } }
+    var validOutputName: Bool {
+        let name = outputBaseName
+        return !name.isEmpty && ![".", ".."].contains(name) && !name.contains("/") && !name.contains(":") && !name.contains("\\") && !name.contains("\0") && name.utf8.count <= 200
+    }
     @Published var enhance = false
     @Published var audioRanges = ""
     @Published var holdRanges = ""
@@ -46,7 +63,6 @@ final class Model: ObservableObject {
     @Published var selectedRecoveredVideo = ""
     @Published var latestRecoveredVideos: [URL] = []
     @Published var latestRecoveredSelection: URL?
-    private var previousEnhancementSource: URL?
     @Published var recoveryVerified: Int?
     @Published var recoveryUncertain = 0
     @Published var player: AVPlayer?
@@ -64,7 +80,7 @@ final class Model: ObservableObject {
     var backend: String { Bundle.main.resourceURL!.appendingPathComponent("backend/reel_rescue.py").path }
     var ready: Bool { python != nil && tools["ffmpeg"] != nil && tools["ffprobe"] != nil }
     var canRun: Bool {
-        ready && !busy && (usesDrive ? !selectedDrive.isEmpty && tools["ddrescue"] != nil : !sources.isEmpty)
+        ready && !busy && (workflow != .video || (validOutputName && !outputExists)) && (usesDrive ? !selectedDrive.isEmpty && tools["ddrescue"] != nil : !sources.isEmpty)
     }
 
     init() {
@@ -89,15 +105,16 @@ final class Model: ObservableObject {
         if workflow == .recovery, !recoveredVideos.isEmpty {
             latestRecoveredSelection = recoveredVideos.first(where: { $0.path == selectedRecoveredVideo }) ?? recoveredVideos.first
         }
-        if workflow == .video { previousEnhancementSource = sources.first }
-        let defaultVideo = video ?? latestRecoveredSelection ?? previousEnhancementSource
+        if workflow == .video { previousEnhancementSources = sources }
+        let defaultVideo = video ?? previousEnhancementSources.first ?? latestRecoveredSelection
         player?.pause(); player = nil; sources = []; cue = nil; result = nil
         audioRanges = ""; holdRanges = ""; error = ""; warning = ""; fraction = nil
         recoveryVerified = nil; recoveryUncertain = 0; recoveredVideos = []; selectedRecoveredVideo = ""
         workflow = next; phase = "Ready"
         detail = ""
         if next == .video, let defaultVideo, FileManager.default.fileExists(atPath: defaultVideo.path) {
-            add([defaultVideo])
+            let available = latestRecoveredVideos.filter { FileManager.default.fileExists(atPath: $0.path) }
+            add(video != nil ? [defaultVideo] : !previousEnhancementSources.isEmpty ? previousEnhancementSources : !available.isEmpty ? available : [defaultVideo], preserveOrder: true)
         }
         if next == .recovery { refreshDrives() }
     }
@@ -167,21 +184,24 @@ final class Model: ObservableObject {
     func chooseSource() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false; panel.allowsMultipleSelection = true
-        panel.message = workflow == .video ? "Choose videos to enhance, or MPEG tracks to combine." : "Choose raw CD images from the same disc. Their extension may be .bin or .iso."
+        panel.message = workflow == .video ? "Choose videos. Compatible MPEG tracks can be combined." : "Choose raw CD images from the same disc. Their extension may be .bin or .iso."
         panel.prompt = "Choose"
         if workflow == .video { panel.allowedContentTypes = [.movie, .video, UTType(filenameExtension: "mkv") ?? .data, UTType(filenameExtension: "mpg") ?? .data] }
         if panel.runModal() == .OK { add(panel.urls, replaceCatalog: workflow == .video) }
     }
 
-    func add(_ urls: [URL], replaceCatalog: Bool = false) {
+    func add(_ urls: [URL], replaceCatalog: Bool = false, preserveOrder: Bool = false) {
         guard !busy else { return }
         if workflow == .video {
-            let selected = urls.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+            let selected = preserveOrder ? urls : urls.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
             if replaceCatalog || selected.count > 1 {
                 latestRecoveredVideos = selected
                 latestRecoveredSelection = selected.first
             }
-            if let first = selected.first { sources = [first]; player = AVPlayer(url: first) }
+            sources = selected
+            previousEnhancementSources = selected
+            if let first = selected.first { player = AVPlayer(url: first) }
+            if selected.count < 2 { combineOutput = false }
         } else {
             for url in urls {
                 if url.pathExtension.lowercased() == "cue" { cue = url }
@@ -199,16 +219,16 @@ final class Model: ObservableObject {
 
     func chooseDestination() {
         let p = NSOpenPanel(); p.canChooseFiles = false; p.canChooseDirectories = true; p.canCreateDirectories = true
-        p.directoryURL = destination; p.prompt = "Save projects here"
+        p.directoryURL = destination; p.prompt = "Save videos here"
         if p.runModal() == .OK, let url = p.url { destination = url }
     }
 
-    func start(preview: Bool = false, combine: Bool = false) {
+    func start(preview: Bool = false) {
         guard canRun, let py = python else { return }
         player?.pause(); busy = true; phase = "Preparing"; detail = ""
         error = ""; warning = ""; log = ""; fraction = nil; project = nil; result = nil
         recoveryVerified = nil; recoveryUncertain = 0; recoveredVideos = []; selectedRecoveredVideo = ""
-        var settings: [String: Any] = ["mode": combine ? "combine" : jobMode, "sources": combine ? latestRecoveredVideos.map(\.path) : sources.map(\.path), "destination": destination.path,
+        var settings: [String: Any] = ["mode": jobMode, "sources": sources.map(\.path), "combine": combineOutput, "output_name": outputName, "destination": destination.path,
                                       "preset": preset, "enhance": enhance,
                                       "audio_ranges": audioRanges, "hold_ranges": holdRanges, "preview_start": previewStart,
                                       "preview": preview, "hardware": true]
@@ -266,7 +286,7 @@ final class Model: ObservableObject {
             recoveryVerified = good; recoveryUncertain = e["uncertain"] as? Int ?? 0
             log += "Verified \(good.formatted()) of \(total.formatted()) sectors.\n"
         case "complete":
-            phase = workflow == .video ? "Viewing copy ready" : "Recovery finished"; fraction = 1
+            phase = workflow == .video ? "Videos ready" : "Recovery finished"; fraction = 1
             result = (e["path"] as? String).map { URL(fileURLWithPath: $0) }
             if workflow != .video, let report = e["report"] as? [String: Any] {
                 let copies = report["outputs"] as? [[String: Any]] ?? []
@@ -274,6 +294,7 @@ final class Model: ObservableObject {
                 recoveredVideos = (copies.isEmpty ? originals : copies).compactMap { ($0["file"] as? String).map { URL(fileURLWithPath: $0) } }
                 selectedRecoveredVideo = recoveredVideos.first?.path ?? ""
                 latestRecoveredVideos = recoveredVideos
+                previousEnhancementSources = recoveredVideos
                 latestRecoveredSelection = recoveredVideos.first
                 detail = ""
             } else { detail = "" }
@@ -308,6 +329,7 @@ struct ContentView: View {
     @EnvironmentObject var m: Model
     @State private var dropActive = false
     @State private var repairsExpanded = false
+    @State private var previewExpanded = false
     @State private var earlierReadsExpanded = false
     private let driveRefresh = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
 
@@ -428,25 +450,24 @@ struct ContentView: View {
 
     var sourceFiles: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if m.workflow == .video && m.latestRecoveredVideos.count > 1 {
-                Picker("Recovered track", selection: Binding(
-                    get: { m.sources.first?.path ?? "" },
-                    set: { m.selectRecoveredTrack($0) }
-                )) {
-                    if let source = m.sources.first, !m.latestRecoveredVideos.contains(source) {
-                        Text(source.lastPathComponent).tag(source.path)
-                    }
-                    ForEach(m.latestRecoveredVideos, id: \.path) { url in
-                        Text(url.lastPathComponent).tag(url.path)
+            if m.workflow == .video && !m.sources.isEmpty {
+                HStack { Text("Videos").font(.headline); Spacer(); Button("Choose videos…", action: m.chooseSource) }
+                ForEach(Array(m.sources.enumerated()), id: \.element) { index, url in
+                    HStack {
+                        Text("\(index + 1).").foregroundStyle(.secondary)
+                        Button(url.lastPathComponent) { m.player = AVPlayer(url: url); previewExpanded = true }.buttonStyle(.plain).lineLimit(1)
+                        Spacer()
+                        Button { m.sources.swapAt(index, index - 1) } label: { Image(systemName: "arrow.up") }.disabled(index == 0).help("Move earlier")
+                        Button { m.sources.swapAt(index, index + 1) } label: { Image(systemName: "arrow.down") }.disabled(index == m.sources.count - 1).help("Move later")
+                        Button { m.sources.remove(at: index); if m.sources.count < 2 { m.combineOutput = false } } label: { Image(systemName: "minus.circle") }.help("Remove video")
                     }
                 }
             }
-            if m.workflow == .video && m.latestRecoveredVideos.count > 1 {
-                Button("Combine recovered tracks") { m.start(combine: true) }.disabled(!m.canRun)
-            }
             if m.workflow == .video, let player = m.player, !m.sources.isEmpty {
-                NativeVideoPlayer(player: player).frame(height: 235).background(.black).clipShape(RoundedRectangle(cornerRadius: 9))
-                HStack { Image(systemName: "film"); Text(m.sources[0].lastPathComponent).lineLimit(1).truncationMode(.middle); Spacer(); Button("Change video", action: m.chooseSource) }
+                DisclosureGroup("Preview", isExpanded: $previewExpanded) {
+                    NativeVideoPlayer(player: player).frame(height: 180).background(.black).clipShape(RoundedRectangle(cornerRadius: 9)).padding(.top, 8)
+                }
+
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: m.workflow == .video ? "film.stack" : "opticaldisc").font(.system(size: 32, weight: .light)).foregroundStyle(accent)
@@ -494,26 +515,42 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 14) {
             Divider()
             Text("Output").font(.headline).foregroundStyle(ink)
+            if m.sources.count > 1 {
+                Picker("Create", selection: $m.combineOutput) {
+                    Text("Separate videos").tag(false)
+                    Text("One combined video").tag(true)
+                }.pickerStyle(.segmented)
+            }
+            HStack {
+                Text("Name")
+                TextField("Video name", text: $m.outputName).textFieldStyle(.roundedBorder)
+            }
+            if !m.validOutputName { Text("Use a short video name without slashes or colons.").font(.caption).foregroundStyle(.red) }
             exportOptions
-            repairOptions
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(m.outputNames, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
+            }
+            if m.outputExists { Text("A file with this name exists. Change the name or folder.").font(.caption).foregroundStyle(.red) }
+            if m.preset != "original" { repairOptions }
         }
     }
 
     var exportOptions: some View {
         VStack(alignment: .leading, spacing: 14) {
             Picker("Format", selection: $m.preset) {
+                Text("Original MPEG · no conversion").tag("original")
                 Text("Original display size · H.264").tag("native")
                 Text("1080p compact copy · H.265").tag("share")
                 Text("1080p high-quality copy · H.264").tag("hd")
             }.pickerStyle(.menu)
-            Toggle("Add gentle noise reduction and sharpening", isOn: $m.enhance)
+            if m.preset != "original" { Toggle("Gentle noise reduction and sharpening", isOn: $m.enhance) }
         }
     }
 
     var repairOptions: some View {
                 DisclosureGroup("Repair specific moments (optional)", isExpanded: $repairsExpanded) {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("One start-end range per line.").font(.caption).foregroundStyle(.secondary)
+                        Text("One start-end range per line, relative to each output video.").font(.caption).foregroundStyle(.secondary)
                         HStack(alignment: .top, spacing: 18) {
                             VStack(alignment: .leading) {
                                 Text("Reduce audio clicks").font(.subheadline.weight(.medium))
@@ -557,24 +594,12 @@ struct ContentView: View {
                 }
                 Spacer()
                 if m.busy { Button("Stop", action: m.stop).controlSize(.large) }
-                else if m.result != nil {
-                    if m.workflow == .video {
-                        Button("Open folder", action: m.revealProject)
-                        Button("Play copy", action: m.playResult).buttonStyle(.borderedProminent).controlSize(.large)
-                    } else {
-                        Button("Open videos", action: m.revealProject).buttonStyle(.borderedProminent).controlSize(.large)
+                else {
+                    if m.result != nil {
+                        Button("Open videos", action: m.revealProject)
+                        if m.workflow == .video { Button("Play", action: m.playResult) }
                     }
-                    Button(m.workflow == .video ? "New copy" : "New recovery") { m.result = nil; m.recoveryVerified = nil; m.recoveredVideos = []; m.phase = "Ready"; m.detail = "" }
-                } else {
-                    if m.workflow == .video {
-                        VStack(spacing: 5) {
-                            HStack { Text("From").font(.caption); TextField("0:00", text: $m.previewStart).frame(width: 62).textFieldStyle(.roundedBorder) }
-                            Button("Preview 10 seconds") { m.start(preview: true) }
-                                .disabled(!m.canRun || !m.audioRanges.isEmpty || !m.holdRanges.isEmpty)
-                                .help("Preview picture settings. Clear repair ranges first, or export the full video to review timed repairs.")
-                        }
-                    }
-                    Button(m.workflow == .video ? "Create viewing copy" : "Start recovery") { m.start() }
+                    Button(m.workflow == .video ? (m.combineOutput || m.sources.count == 1 ? "Create video" : "Create videos") : "Start recovery") { m.start() }
                         .buttonStyle(.borderedProminent).controlSize(.large).disabled(!m.canRun)
                 }
                 Button { m.showLog = true } label: { Image(systemName: "text.alignleft") }.help("Task details")
