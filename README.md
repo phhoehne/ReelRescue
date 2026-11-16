@@ -187,6 +187,8 @@ Run the tests from the repository folder:
 python3 -m unittest discover -s tests -v
 ```
 
+Build 24 passed all 80 full-length export scenarios using three recovered MPEG tracks. See the [complete acceptance report](docs/testing/build24-real-footage.md) for coverage, corrected faults and validation details.
+
 For full-length acceptance testing with three compatible recovered MPEG tracks:
 
 ```sh
