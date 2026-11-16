@@ -1,6 +1,9 @@
 # Changelog
 
-## 1.1.0 — Unreleased
+## 1.1.0 — 2026-11-16
+
+- Suppress the filename-conflict warning for a successfully completed export while retaining overwrite protection for existing videos.
+- Verify 80 full-length export scenarios across all containers, codecs, resolutions, enhancement settings and separate/combined output; see the build 24 acceptance report.
 
 - Correct overlapping decoded-audio timestamps before AAC encoding, preserving samples and forward gaps while preventing Matroska validation failures.
 
@@ -41,5 +44,4 @@
 - Bundle the Python runtime, FFmpeg/ffprobe, codecs and ddrescue; no Homebrew setup is required.
 - Include third-party licenses, matching dependency sources and Developer ID signing support.
 
-This is the first planned public release. Local test builds are reviewed before
-release packaging and notarization.
+First public release, version 1.1.0 (build 25).
