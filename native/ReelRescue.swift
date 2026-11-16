@@ -98,6 +98,17 @@ final class Model: ObservableObject {
         return (combineOutput || sources.count <= 1) ? ["\(name).\(outputExtension)"] : sources.indices.map { String(format: "%@_%02d.%@", name, $0 + 1, outputExtension) }
     }
     var outputExists: Bool { outputNames.contains { FileManager.default.fileExists(atPath: destination.appendingPathComponent($0).path) } }
+    private var completedExportSettings: [String]?
+    private var exportSettings: [String] {
+        [outputName, destination.standardizedFileURL.path, String(combineOutput), container, codec, resolution,
+         String(enhance), audioRanges, holdRanges] + sources.map { $0.standardizedFileURL.path }
+    }
+    var showsOutputConflict: Bool {
+        guard !busy, outputExists else { return false }
+        let expected = Set(outputNames.map { destination.appendingPathComponent($0).standardizedFileURL })
+        let saved = Set(savedVideos.map(\.standardizedFileURL))
+        return completedExportSettings != exportSettings || saved != expected
+    }
     var validOutputName: Bool {
         let name = outputBaseName
         return !name.isEmpty && ![".", ".."].contains(name) && !name.contains("/") && !name.contains(":") && !name.contains("\\") && !name.contains("\0") && name.utf8.count <= 200
@@ -345,6 +356,7 @@ final class Model: ObservableObject {
             let outputs = report["outputs"] as? [[String: Any]] ?? []
             savedVideos = outputs.compactMap { ($0["file"] as? String).map { URL(fileURLWithPath: $0) } }
             if savedVideos.isEmpty, let result { savedVideos = [result] }
+            completedExportSettings = workflow == .video ? exportSettings : nil
             if workflow != .video {
                 let copies = report["outputs"] as? [[String: Any]] ?? []
                 let originals = report["extracted"] as? [[String: Any]] ?? []
@@ -601,7 +613,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 3) {
                 ForEach(m.outputNames, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
             }
-            if m.outputExists { Text("A file with this name exists. Change the name or folder.").font(.caption).foregroundStyle(.red) }
+            if m.showsOutputConflict { Text("A file with this name exists. Change the name or folder.").font(.caption).foregroundStyle(.red) }
             if m.preset != "original" { repairOptions }
         }
     }

@@ -87,6 +87,46 @@ import AppKit
         precondition(manual.sizeEstimate.contains("varies"))
         manual.outputName = "../Wedding"
         precondition(!manual.validOutputName)
+        let completion = Model(preferences: preferences)
+        completion.workflow = .video
+        completion.sources = [first,second]
+        completion.destination = root
+        completion.outputName = "Saved wedding"
+        completion.python = "/usr/bin/true"
+        completion.tools = ["ffmpeg":"test", "ffprobe":"test"]
+        let saved = completion.outputNames.map { root.appendingPathComponent($0) }
+        for url in saved { try Data().write(to: url) }
+        precondition(completion.showsOutputConflict, "An existing target must warn before export")
+        precondition(!completion.canRun, "Existing videos must remain protected")
+        completion.busy = true
+        precondition(!completion.showsOutputConflict, "Files published during an active export must not flash a conflict")
+        try finish(completion,saved)
+        completion.busy = false
+        precondition(!completion.showsOutputConflict, "Successful separate export must not warn about its own files")
+        precondition(completion.outputExists && !completion.canRun, "Completion must not permit overwriting the saved videos")
+        completion.resolution = "1080"
+        precondition(completion.showsOutputConflict, "Changed settings targeting the same name must warn")
+        completion.resolution = "source"
+        precondition(!completion.showsOutputConflict)
+        completion.outputName = "Another wedding"
+        precondition(!completion.showsOutputConflict && completion.canRun)
+        try Data().write(to: root.appendingPathComponent(completion.outputNames[0]))
+        precondition(completion.showsOutputConflict && !completion.canRun, "An unrelated existing file must still warn")
+        completion.outputName = "Combined wedding"
+        completion.combineOutput = true
+        let combined = root.appendingPathComponent(completion.outputNames[0])
+        try Data().write(to: combined)
+        try finish(completion,[combined])
+        precondition(!completion.showsOutputConflict, "Successful combined export must not warn about its own file")
+        precondition(!completion.canRun)
+        completion.enhance = true
+        precondition(completion.showsOutputConflict, "A new enhancement targeting the same file must warn")
+        completion.enhance = false
+        let preview = root.appendingPathComponent("Combined wedding_preview.mp4")
+        try Data().write(to: preview)
+        try finish(completion,[preview])
+        precondition(completion.showsOutputConflict, "A preview must not hide a conflict with the final output")
+        print("Completion conflict and overwrite-protection checks passed.")
         print("Recovered-footage navigation checks passed.")
     }
 }
